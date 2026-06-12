@@ -1,0 +1,145 @@
+using ParryArena.Data;
+using UnityEngine;
+
+namespace ParryArena.Arena
+{
+    /// <summary>
+    /// Third-person locomotion on a CharacterController, plus combat input
+    /// forwarded to the shared <see cref="ActorCombat"/> FSM (LMB swing, RMB
+    /// hold-to-block / tap-to-parry, Space dodge).
+    ///
+    /// Movement basis depends on the camera: free mode is camera-relative; while
+    /// locked on (<see cref="ThirdPersonCamera.IsLocked"/>) the player faces the
+    /// target and strafes around it (A/D circle, W/S approach/retreat). Dodge and
+    /// knockback velocities come from the FSM. Disabled by
+    /// <see cref="ArenaController"/> while paused / after the match ends.
+    /// </summary>
+    [RequireComponent(typeof(CharacterController))]
+    public class PlayerController : MonoBehaviour
+    {
+        [SerializeField] float _moveSpeed = 5.5f;
+        [SerializeField] float _rotationLerp = 14f;
+        [SerializeField] float _gravity = -22f;
+        [SerializeField] float _dodgeSpeed = 9f;
+
+        CharacterController _controller;
+        ThirdPersonCamera _cameraRig;
+        ActorCombat _combat;
+
+        float _verticalSpeed;
+        Vector3 _dodgeDir = Vector3.forward;
+
+        public Health Health { get; private set; }
+        public float Stamina => _combat != null ? _combat.Stamina : 0f;
+        public float MaxStamina => _combat != null ? _combat.MaxStamina : 1f;
+
+        public void Configure(LoadoutDefinition loadout, ThirdPersonCamera cameraRig, ActorCombat combat)
+        {
+            _cameraRig = cameraRig;
+            _combat = combat;
+
+            _controller = GetComponent<CharacterController>();
+            Health = GetComponent<Health>();
+            Health.Init(loadout.MaxHealth);
+        }
+
+        void Update()
+        {
+            if (_controller == null)
+                return;
+
+            _combat.SetGuardHeld(Input.GetMouseButton(1));
+
+            Move();
+
+            if (Input.GetMouseButtonDown(0))
+                _combat.RequestAttack();          // stamina-gated inside the FSM
+            if (Input.GetMouseButtonDown(1))
+                _combat.RequestParry();
+            if (Input.GetKeyDown(KeyCode.Space))
+                TryDodge();
+        }
+
+        void Move()
+        {
+            bool locked = IsLocked();
+            Vector3 wish = WishDirection(locked);
+
+            Vector3 horizontal;
+            if (_combat.State == CombatState.Dodge)
+                horizontal = _dodgeDir * (_dodgeSpeed * Mathf.Clamp01(1f - _combat.DodgeNormalizedTime));
+            else if (_combat.IsInHitstun)
+                horizontal = Vector3.zero;        // no voluntary movement during hitstun
+            else
+                horizontal = wish * _moveSpeed;
+
+            horizontal += _combat.KnockbackVelocity;
+
+            if (_controller.isGrounded && _verticalSpeed < 0f)
+                _verticalSpeed = -1f;
+            _verticalSpeed += _gravity * Time.deltaTime;
+
+            _controller.Move((horizontal + Vector3.up * _verticalSpeed) * Time.deltaTime);
+
+            UpdateFacing(locked, wish);
+        }
+
+        void TryDodge()
+        {
+            Vector3 dir = WishDirection(IsLocked());
+            if (dir.sqrMagnitude < 0.01f)
+                dir = -transform.forward;          // backstep when no input
+            if (_combat.RequestDodge())
+                _dodgeDir = dir.normalized;
+        }
+
+        Vector3 WishDirection(bool locked)
+        {
+            float h = Input.GetAxisRaw("Horizontal");
+            float v = Input.GetAxisRaw("Vertical");
+
+            Vector3 wish;
+            if (locked)
+            {
+                Vector3 forward = FlatToTarget();
+                Vector3 right = Vector3.Cross(Vector3.up, forward);
+                wish = forward * v + right * h;
+            }
+            else
+            {
+                Transform cam = _cameraRig.transform;
+                Vector3 camForward = Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized;
+                Vector3 camRight = Vector3.ProjectOnPlane(cam.right, Vector3.up).normalized;
+                wish = camForward * v + camRight * h;
+            }
+
+            if (wish.sqrMagnitude > 1f)
+                wish.Normalize();
+            return wish;
+        }
+
+        void UpdateFacing(bool locked, Vector3 wish)
+        {
+            Vector3 face;
+            if (locked)
+                face = FlatToTarget();
+            else if (_combat.State != CombatState.Dodge && wish.sqrMagnitude > 0.01f)
+                face = wish;
+            else
+                return;
+
+            if (face.sqrMagnitude > 0.0001f)
+                transform.rotation = Quaternion.Slerp(transform.rotation,
+                    Quaternion.LookRotation(face, Vector3.up), _rotationLerp * Time.deltaTime);
+        }
+
+        Vector3 FlatToTarget()
+        {
+            Vector3 to = _cameraRig.LockTarget.position - transform.position;
+            to.y = 0f;
+            return to.sqrMagnitude > 0.0001f ? to.normalized : transform.forward;
+        }
+
+        bool IsLocked() => _cameraRig != null && _cameraRig.IsLocked && _cameraRig.LockTarget != null;
+    }
+}
