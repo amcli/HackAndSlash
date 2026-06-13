@@ -5,10 +5,13 @@ using UnityEngine;
 namespace ParryArena.UI
 {
     /// <summary>
-    /// In-fight HUD: enemy health (top), player health + stamina (bottom-left),
-    /// and a controls hint. Health bars update via events; stamina is polled
-    /// because it changes continuously. The enemy stagger meter from the design
-    /// lands here once the combat loop exists.
+    /// In-fight HUD: enemy name / health / stagger (top), player health + stamina
+    /// (bottom-left), and a controls hint. Health and stagger bars update via
+    /// events; stamina is polled because it changes continuously.
+    ///
+    /// Unlike the toggleable <see cref="UIScreen"/> panels, the HUD is always
+    /// visible and is built with live actor references rather than callbacks, so
+    /// it stays a plain MonoBehaviour instead of deriving from <see cref="UIScreen"/>.
     /// </summary>
     public class ArenaHUD : MonoBehaviour
     {
@@ -16,19 +19,21 @@ namespace ParryArena.UI
         StatBar _playerHealth;
         StatBar _playerStamina;
         StatBar _enemyHealth;
+        StatBar _enemyStagger;
 
-        public void Build(Transform canvas, PlayerController player, EnemyActor enemy)
+        public void Build(Transform canvas, PlayerController player, EnemyController enemy, StaggerMeter enemyStagger)
         {
             _player = player;
 
-            // Enemy: top-centre name + health.
+            // Enemy: top-centre name + health + stagger.
             var enemyBox = UIFactory.CreateAnchoredBox(canvas, "EnemyHUD",
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -28f), new Vector2(720f, 64f));
-            UIFactory.AddVerticalLayout(enemyBox.gameObject, 6f, TextAnchor.UpperCenter);
+                new Vector2(0f, -28f), new Vector2(720f, 88f));
+            UIFactory.AddVerticalLayout(enemyBox.gameObject, 5f, TextAnchor.UpperCenter);
             UIFactory.CreateLabel(enemyBox, enemy.Definition.DisplayName, UITheme.SmallSize,
                 TextAlignmentOptions.Center, UITheme.Text);
             _enemyHealth = UIFactory.CreateBar(enemyBox, UITheme.EnemyHealth, 18f, 720f);
+            _enemyStagger = UIFactory.CreateBar(enemyBox, UITheme.Stagger, 8f, 720f);
 
             // Player: bottom-left health + stamina.
             var playerBox = UIFactory.CreateAnchoredBox(canvas, "PlayerHUD",
@@ -43,15 +48,17 @@ namespace ParryArena.UI
                 new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(0f, 22f), new Vector2(960f, 28f));
             UIFactory.CreateLabel(hintBox,
-                "WASD move   •   LMB attack   •   RMB block / tap-parry   •   Space dodge   •   MMB lock-on   •   Esc pause",
+                "WASD move   •   LMB attack (hold = heavy)   •   RMB block / tap-parry   •   Space dodge   •   MMB lock-on   •   Esc pause",
                 UITheme.SmallSize, TextAlignmentOptions.Center, UITheme.TextMuted);
 
             // Health bars are event-driven; set the initial fill explicitly since
             // Init() already fired before we subscribed.
             player.Health.Changed += h => _playerHealth.SetFraction(h.Fraction);
             enemy.Health.Changed += h => _enemyHealth.SetFraction(h.Fraction);
+            enemyStagger.Changed += m => _enemyStagger.SetFraction(m.Fraction);
             _playerHealth.SetFraction(player.Health.Fraction);
             _enemyHealth.SetFraction(enemy.Health.Fraction);
+            _enemyStagger.SetFraction(enemyStagger.Fraction);
         }
 
         void Update()

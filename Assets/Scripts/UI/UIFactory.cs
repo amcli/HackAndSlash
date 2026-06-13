@@ -310,7 +310,28 @@ namespace ParryArena.UI
             return bar;
         }
 
-        // ---- Helpers -----------------------------------------------------------
+        // ---- Screens / helpers -------------------------------------------------
+
+        /// <summary>Creates a full-screen stretched child GameObject under <paramref name="parent"/>.</summary>
+        public static GameObject CreateStretchedChild(Transform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            Stretch((RectTransform)go.transform);
+            return go;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="UIScreen"/> on a stretched child and runs its
+        /// <see cref="UIScreen.BuildUI"/>. The single creation path for every
+        /// menu page and overlay, used by both the menu and arena controllers.
+        /// </summary>
+        public static T CreateScreen<T>(Transform parent, string name) where T : UIScreen
+        {
+            var screen = CreateStretchedChild(parent, name).AddComponent<T>();
+            screen.BuildUI();
+            return screen;
+        }
 
         public static void Stretch(RectTransform rt)
         {

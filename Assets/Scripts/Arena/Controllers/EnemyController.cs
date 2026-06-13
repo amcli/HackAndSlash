@@ -11,7 +11,7 @@ namespace ParryArena.Arena
     /// <see cref="EnemyDefinition"/>.
     /// </summary>
     [RequireComponent(typeof(Health))]
-    public class EnemyActor : MonoBehaviour
+    public class EnemyController : MonoBehaviour
     {
         [SerializeField] float _turnSpeed = 6f;
         [SerializeField] float _attackInterval = 1.5f;

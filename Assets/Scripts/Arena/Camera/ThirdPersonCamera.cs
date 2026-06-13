@@ -22,6 +22,8 @@ namespace ParryArena.Arena
         Transform _target;       // the player (followed)
         Transform _lockTarget;   // the enemy (focused when locked)
         GameSettings _settings;
+        Camera _camera;
+        float _baseFov;
         bool _locked;
         float _yaw;
         float _pitch = 15f;
@@ -34,6 +36,8 @@ namespace ParryArena.Arena
             _target = target;
             _settings = settings;
             _yaw = target.eulerAngles.y;
+            _camera = GetComponent<Camera>();
+            _baseFov = _camera != null ? _camera.fieldOfView : 60f;
         }
 
         public void SetLockTarget(Transform lockTarget) => _lockTarget = lockTarget;
@@ -86,6 +90,10 @@ namespace ParryArena.Arena
             // Screen shake (e.g. on a successful parry), applied in screen space.
             Vector3 shake = ScreenShake.Evaluate(Time.unscaledDeltaTime);
             transform.position += transform.right * shake.x + transform.up * shake.y;
+
+            // FOV punch-in (e.g. on a riposte).
+            if (_camera != null)
+                _camera.fieldOfView = _baseFov + CameraPunch.EvaluateFovDelta(Time.unscaledDeltaTime);
         }
     }
 }

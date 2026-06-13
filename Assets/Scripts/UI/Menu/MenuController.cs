@@ -65,12 +65,7 @@ namespace ParryArena.UI
 
         T CreateScreen<T>(string name) where T : UIScreen
         {
-            var go = new GameObject(name, typeof(RectTransform));
-            go.transform.SetParent(_canvas.transform, false);
-            UIFactory.Stretch((RectTransform)go.transform);
-
-            var screen = go.AddComponent<T>();
-            screen.BuildUI();
+            var screen = UIFactory.CreateScreen<T>(_canvas.transform, name);
             _screens.Add(screen);
             return screen;
         }

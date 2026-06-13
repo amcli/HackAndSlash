@@ -2,13 +2,6 @@ using ParryArena.Data;
 
 namespace ParryArena.Core
 {
-    public enum MatchResult
-    {
-        None,
-        Victory,
-        Defeat
-    }
-
     /// <summary>
     /// The choices and outcome that need to survive scene transitions
     /// (menu -> arena -> result). Lives on the persistent <see cref="GameApp"/>.

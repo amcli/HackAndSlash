@@ -2,28 +2,19 @@ using UnityEngine;
 
 namespace ParryArena.Arena
 {
-    /// <summary>A swing direction expressed as the windup and active-end blade poses (pivot Euler, degrees).</summary>
-    public readonly struct SwingProfile
-    {
-        public readonly Vector3 Windup;
-        public readonly Vector3 ActiveEnd;
-
-        public SwingProfile(Vector3 windup, Vector3 activeEnd)
-        {
-            Windup = windup;
-            ActiveEnd = activeEnd;
-        }
-    }
-
     /// <summary>
     /// The per-actor combat state machine, shared by the player and enemies
     /// (plan: "one FSM per actor"). Owns the swing, the unified guard
     /// (parry window → held block), the dodge with i-frames, hitstun/knockback,
-    /// stamina, and the procedural weapon animation.
+    /// stamina, the charged heavy strike, and the staggered state.
     ///
-    /// Resolution priority (handled in <see cref="CombatResolver"/>):
-    /// perfect parry > dodge i-frames > block > clean hit. Delta-time driven,
-    /// so a paused game (timeScale 0) freezes it cleanly.
+    /// The player attacks by charging (hold LMB → <see cref="RequestChargeStart"/>,
+    /// release → <see cref="ReleaseCharge"/>); enemies use a timed windup
+    /// (<see cref="RequestAttack"/>). Damage/stagger for each swing are pushed to
+    /// the <see cref="Hitbox"/> at the active frame, scaled by charge.
+    ///
+    /// Resolution priority lives in <see cref="CombatResolver"/>:
+    /// parry > dodge i-frames > block > riposte (vs staggered) > clean hit.
     /// </summary>
     public class ActorCombat : MonoBehaviour
     {
@@ -41,6 +32,7 @@ namespace ParryArena.Arena
         [SerializeField] float _dodgeDuration = 0.45f;
         [SerializeField] float _iFrameStart = 0.05f;
         [SerializeField] float _iFrameEnd = 0.30f;
+        [SerializeField] float _dodgeCooldown = 1f;
 
         [Header("Hitstun / knockback")]
         [SerializeField] float _hitstunDuration = 0.30f;
@@ -53,9 +45,19 @@ namespace ParryArena.Arena
         [SerializeField] float _blockStaminaDrainPerDamage = 1.6f;
         [SerializeField] float _blockChipFraction = 0.25f;
 
+        [Header("Charged heavy strike")]
+        [SerializeField] float _maxChargeTime = 1.5f;       // holding past this adds nothing
+        [SerializeField] float _chargeRaiseTime = 0.18f;    // how fast the blade winds up
+        [SerializeField] float _heavyDamageMultiplier = 2.2f;
+        [SerializeField] float _heavyStaggerMultiplier = 2.5f;
+
+        [Header("Staggered (when this actor is broken)")]
+        [SerializeField] float _staggerDuration = 2.5f;
+
         [Header("Blade poses (pivot Euler degrees; blade points +Z at rest)")]
         [SerializeField] Vector3 _restPose = new Vector3(-20f, -10f, 0f);
-        [SerializeField] Vector3 _guardPose = new Vector3(-30f, -70f, 35f); // cross-body parry/block guard
+        [SerializeField] Vector3 _guardPose = new Vector3(-30f, -70f, 35f);  // cross-body parry/block guard
+        [SerializeField] Vector3 _staggeredPose = new Vector3(85f, 10f, 0f); // slumped, blade down
 
         /// <summary>Enemy attacks colour the blade during windup so the swing is readable.</summary>
         public bool TelegraphWindup;
@@ -69,9 +71,11 @@ namespace ParryArena.Arena
 
         static readonly Color ParryColor = new Color(0.40f, 0.72f, 1.00f);
         static readonly Color TelegraphColor = new Color(0.95f, 0.25f, 0.20f);
+        static readonly Color ChargeColor = new Color(1.00f, 0.82f, 0.35f);
 
         WeaponRig _rig;
         Hitbox _hitbox;
+        StaggerMeter _stagger;
         public Health Health { get; private set; }
 
         CombatState _state = CombatState.Idle;
@@ -85,6 +89,12 @@ namespace ParryArena.Arena
 
         bool _guardHeld;
         Vector3 _knockbackVelocity;
+        float _dodgeCooldownRemaining;
+        TrailRenderer _dodgeTrail;
+
+        [SerializeField] float _attackDamage = 5f;
+        float _attackStagger;
+        float _chargeFractionForSwing;
 
         // Stamina (owned here so attack/block/dodge costs live in one place).
         bool _usesStamina;
@@ -96,6 +106,7 @@ namespace ParryArena.Arena
         public bool IsIdle => _state == CombatState.Idle;
         public bool IsBlocking => _state == CombatState.Block;
         public bool IsInHitstun => _state == CombatState.Hitstun;
+        public bool IsStaggered => _state == CombatState.Staggered;
         public bool IsInvulnerable =>
             _state == CombatState.Dodge && _timer >= _iFrameStart && _timer < _iFrameEnd;
 
@@ -134,6 +145,12 @@ namespace ParryArena.Arena
             _attackStaminaCost = attackCost;
         }
 
+        public void ConfigureOffense(float attackDamage, float attackStagger)
+        {
+            _attackDamage = attackDamage;
+            _attackStagger = attackStagger;
+        }
+
         public void SetSwingTimings(float windup, float active, float recovery)
         {
             _windup = windup;
@@ -141,8 +158,12 @@ namespace ParryArena.Arena
             _recovery = recovery;
         }
 
-        public void SetGuardHeld(bool held) => _guardHeld = held;
+        public void SetDodgeTrail(TrailRenderer trail) => _dodgeTrail = trail;
+        public void SetStaggerMeter(StaggerMeter meter) => _stagger = meter;
 
+        // ---- Input / requests --------------------------------------------------
+
+        /// <summary>Timed-windup attack used by AI. The player uses charge instead.</summary>
         public bool RequestAttack()
         {
             if (_state != CombatState.Idle)
@@ -150,11 +171,31 @@ namespace ParryArena.Arena
             if (!SpendStamina(_attackStaminaCost))
                 return false;
 
-            _swing = Swings[_swingIndex];
-            _swingIndex = (_swingIndex + 1) % Swings.Length;
+            BeginSwing();
             _state = CombatState.Windup;
-            _timer = 0f;
             return true;
+        }
+
+        /// <summary>Player presses LMB: wind the blade up and start charging.</summary>
+        public bool RequestChargeStart()
+        {
+            if (_state != CombatState.Idle)
+                return false;
+            if (!SpendStamina(_attackStaminaCost))
+                return false;
+
+            BeginSwing();
+            _state = CombatState.Charge;
+            return true;
+        }
+
+        /// <summary>Player releases LMB: swing with damage/stagger scaled by how long it was held.</summary>
+        public void ReleaseCharge()
+        {
+            if (_state != CombatState.Charge)
+                return;
+            _chargeFractionForSwing = Mathf.Clamp01(_timer / _maxChargeTime);
+            EnterActive();
         }
 
         public bool RequestParry()
@@ -170,14 +211,21 @@ namespace ParryArena.Arena
         {
             if (_state != CombatState.Idle && _state != CombatState.Block)
                 return false;
+            if (_dodgeCooldownRemaining > 0f)
+                return false;
             if (!SpendStamina(_dodgeStaminaCost))
                 return false;
 
             _state = CombatState.Dodge;
             _timer = 0f;
+            _dodgeCooldownRemaining = _dodgeCooldown;
             ApplyPose(_restPose);
             return true;
         }
+
+        public void SetGuardHeld(bool held) => _guardHeld = held;
+
+        // ---- Reactions ---------------------------------------------------------
 
         /// <summary>Called on this actor when it successfully parries an incoming attack.</summary>
         public void OnParrySuccess() => _flashTimer = 0.12f;
@@ -185,7 +233,7 @@ namespace ParryArena.Arena
         /// <summary>Called on the attacker when its swing is parried — dump into recovery (basic stagger).</summary>
         public void OnGotParried()
         {
-            if (_state != CombatState.Windup && _state != CombatState.Active)
+            if (_state != CombatState.Windup && _state != CombatState.Active && _state != CombatState.Charge)
                 return;
             EndSwingVisuals();
             _recoveryStartPose = _currentPose;
@@ -212,17 +260,30 @@ namespace ParryArena.Arena
         /// <summary>Called when a clean hit lands: enter hitstun and take knockback along the hit direction.</summary>
         public void OnHit(Vector3 fromDirection) => EnterHitstun(fromDirection);
 
-        void EnterHitstun(Vector3 direction)
+        /// <summary>Adds to this actor's stagger meter (if any); fills → staggered.</summary>
+        public void AddStagger(float amount)
         {
-            EndSwingVisuals();
-            ApplyPose(_restPose);
-            _state = CombatState.Hitstun;
-            _timer = 0f;
+            if (_stagger == null || _state == CombatState.Staggered)
+                return;
+            if (Health != null && Health.IsDead)
+                return;
 
-            direction.y = 0f;
-            if (direction.sqrMagnitude > 0.0001f)
-                _knockbackVelocity = direction.normalized * _knockbackSpeed;
+            _stagger.Add(amount);
+            if (_stagger.IsFull)
+            {
+                _stagger.ResetMeter();
+                EnterStaggered();
+            }
         }
+
+        /// <summary>Called on a staggered actor when it eats a riposte — recoil out of the stagger.</summary>
+        public void OnRiposted()
+        {
+            if (_state == CombatState.Staggered)
+                EnterHitstun(-transform.forward);
+        }
+
+        // ---- Update / state machine -------------------------------------------
 
         void Update()
         {
@@ -234,12 +295,19 @@ namespace ParryArena.Arena
 
             _knockbackVelocity = Vector3.MoveTowards(_knockbackVelocity, Vector3.zero, _knockbackDecay * dt);
 
+            if (_dodgeCooldownRemaining > 0f)
+                _dodgeCooldownRemaining -= dt;
+
             // Stamina regenerates except while actively guarding.
             if (_usesStamina && _state != CombatState.Block && _state != CombatState.Parry)
                 _stamina = Mathf.Min(_maxStamina, _stamina + _staminaRegenPerSecond * dt);
 
             switch (_state)
             {
+                case CombatState.Charge:
+                    ApplyPose(Vector3.Lerp(_restPose, _swing.Windup, Smooth(_timer, _chargeRaiseTime)));
+                    break;
+
                 case CombatState.Windup:
                     ApplyPose(Vector3.Lerp(_restPose, _swing.Windup, Smooth(_timer, _windup)));
                     if (_timer >= _windup)
@@ -286,7 +354,16 @@ namespace ParryArena.Arena
                     if (_timer >= _hitstunDuration)
                         EnterIdle();
                     break;
+
+                case CombatState.Staggered:
+                    ApplyPose(_staggeredPose);
+                    if (_timer >= _staggerDuration)
+                        EnterIdle();
+                    break;
             }
+
+            if (_dodgeTrail != null)
+                _dodgeTrail.emitting = _state == CombatState.Dodge;
 
             UpdateBladeColor();
         }
@@ -301,14 +378,29 @@ namespace ParryArena.Arena
                 ApplyPose(Vector3.Lerp(_guardPose, _restPose, Smooth(_timer - _parryStartup - _parryActiveWindow, _parryRecovery)));
         }
 
+        void BeginSwing()
+        {
+            _swing = Swings[_swingIndex];
+            _swingIndex = (_swingIndex + 1) % Swings.Length;
+            _chargeFractionForSwing = 0f;
+            _timer = 0f;
+        }
+
         void EnterActive()
         {
             _state = CombatState.Active;
             _timer = 0f;
             if (_hitbox != null)
+            {
+                float damage = _attackDamage * Mathf.Lerp(1f, _heavyDamageMultiplier, _chargeFractionForSwing);
+                float stagger = _attackStagger * Mathf.Lerp(1f, _heavyStaggerMultiplier, _chargeFractionForSwing);
+                _hitbox.SetSwingPower(damage, stagger);
                 _hitbox.Activate();
+            }
             if (_rig != null && _rig.Trail != null)
                 _rig.Trail.emitting = true;
+
+            CombatAudio.Play(CombatSound.Swing, 0.55f);
         }
 
         void EnterRecovery()
@@ -326,10 +418,31 @@ namespace ParryArena.Arena
             ApplyPose(_guardPose);
         }
 
+        void EnterStaggered()
+        {
+            EndSwingVisuals();
+            _state = CombatState.Staggered;
+            _timer = 0f;
+            ApplyPose(_staggeredPose);
+        }
+
+        void EnterHitstun(Vector3 direction)
+        {
+            EndSwingVisuals();
+            ApplyPose(_restPose);
+            _state = CombatState.Hitstun;
+            _timer = 0f;
+
+            direction.y = 0f;
+            if (direction.sqrMagnitude > 0.0001f)
+                _knockbackVelocity = direction.normalized * _knockbackSpeed;
+        }
+
         void EnterIdle()
         {
             _state = CombatState.Idle;
             _timer = 0f;
+            _chargeFractionForSwing = 0f;
             ApplyPose(_restPose);
         }
 
@@ -375,13 +488,18 @@ namespace ParryArena.Arena
                     case CombatState.Block:
                         color = Color.Lerp(_bladeBaseColor, ParryColor, 0.35f);
                         break;
+                    case CombatState.Charge:
+                        color = Color.Lerp(_bladeBaseColor, ChargeColor, Mathf.Clamp01(_timer / _maxChargeTime));
+                        break;
                     case CombatState.Windup:
                         color = TelegraphWindup
                             ? Color.Lerp(_bladeBaseColor, TelegraphColor, Smooth(_timer, _windup))
                             : _bladeBaseColor;
                         break;
                     case CombatState.Active:
-                        color = TelegraphWindup ? TelegraphColor : _bladeBaseColor;
+                        color = TelegraphWindup
+                            ? TelegraphColor
+                            : Color.Lerp(_bladeBaseColor, ChargeColor, _chargeFractionForSwing);
                         break;
                     default:
                         color = _bladeBaseColor;

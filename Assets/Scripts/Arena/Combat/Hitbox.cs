@@ -14,6 +14,7 @@ namespace ParryArena.Arena
     {
         public CombatTeam Team { get; private set; }
         public float Damage { get; private set; }
+        public float StaggerDamage { get; private set; }
         public bool Parryable { get; private set; }
         public bool Blockable { get; private set; } = true;
         public ActorCombat Owner { get; private set; }
@@ -32,16 +33,22 @@ namespace ParryArena.Arena
             _debug.SetActiveColor(CombatDebug.HitboxActiveColor);
         }
 
-        public void Configure(CombatTeam team, float damage, bool parryable, bool blockable, Vector3 halfExtents, ActorCombat owner)
+        public void Configure(CombatTeam team, bool parryable, bool blockable, Vector3 halfExtents, ActorCombat owner)
         {
             Team = team;
-            Damage = damage;
             Parryable = parryable;
             Blockable = blockable;
             Owner = owner;
             _halfExtents = halfExtents;
             if (_debug != null)
                 _debug.SetSize(halfExtents * 2f);
+        }
+
+        /// <summary>Set by <see cref="ActorCombat"/> at the start of each swing (scaled by charge for the player).</summary>
+        public void SetSwingPower(float damage, float staggerDamage)
+        {
+            Damage = damage;
+            StaggerDamage = staggerDamage;
         }
 
         public void Activate()

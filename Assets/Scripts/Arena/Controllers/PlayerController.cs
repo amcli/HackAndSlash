@@ -21,6 +21,7 @@ namespace ParryArena.Arena
         [SerializeField] float _rotationLerp = 14f;
         [SerializeField] float _gravity = -22f;
         [SerializeField] float _dodgeSpeed = 9f;
+        [SerializeField] float _inputBuffer = 0.14f; // ~8 frames @60: presses near a state boundary still fire
 
         CharacterController _controller;
         ThirdPersonCamera _cameraRig;
@@ -28,6 +29,10 @@ namespace ParryArena.Arena
 
         float _verticalSpeed;
         Vector3 _dodgeDir = Vector3.forward;
+
+        enum BufferedInput { None, Attack, Parry, Dodge }
+        BufferedInput _buffered;
+        float _bufferTimer;
 
         public Health Health { get; private set; }
         public float Stamina => _combat != null ? _combat.Stamina : 0f;
@@ -52,12 +57,61 @@ namespace ParryArena.Arena
 
             Move();
 
+            if (_bufferTimer > 0f)
+                _bufferTimer -= Time.deltaTime;
+            else
+                _buffered = BufferedInput.None;
+
+            // Releasing LMB always fires immediately (it only matters mid-charge);
+            // the press-actions are buffered so they survive a state boundary.
+            if (Input.GetMouseButtonUp(0))
+                _combat.ReleaseCharge();
             if (Input.GetMouseButtonDown(0))
-                _combat.RequestAttack();          // stamina-gated inside the FSM
+                Queue(BufferedInput.Attack);       // hold to charge a heavy strike
             if (Input.GetMouseButtonDown(1))
-                _combat.RequestParry();
+                Queue(BufferedInput.Parry);
             if (Input.GetKeyDown(KeyCode.Space))
-                TryDodge();
+                Queue(BufferedInput.Dodge);
+
+            TryConsumeBuffer();
+        }
+
+        // ---- Input buffering ---------------------------------------------------
+
+        void Queue(BufferedInput input)
+        {
+            _buffered = input;
+            _bufferTimer = _inputBuffer;
+            TryConsumeBuffer(); // fire this frame if the FSM is already ready
+        }
+
+        void TryConsumeBuffer()
+        {
+            bool consumed = false;
+            switch (_buffered)
+            {
+                case BufferedInput.Attack:
+                    if (Input.GetMouseButton(0))
+                        consumed = _combat.RequestChargeStart();      // still held → charge
+                    else if (_combat.RequestChargeStart())
+                    {
+                        _combat.ReleaseCharge();                      // already released → light tap
+                        consumed = true;
+                    }
+                    break;
+                case BufferedInput.Parry:
+                    consumed = _combat.RequestParry();
+                    break;
+                case BufferedInput.Dodge:
+                    consumed = TryDodge();
+                    break;
+            }
+
+            if (consumed)
+            {
+                _buffered = BufferedInput.None;
+                _bufferTimer = 0f;
+            }
         }
 
         void Move()
@@ -84,13 +138,15 @@ namespace ParryArena.Arena
             UpdateFacing(locked, wish);
         }
 
-        void TryDodge()
+        bool TryDodge()
         {
             Vector3 dir = WishDirection(IsLocked());
             if (dir.sqrMagnitude < 0.01f)
                 dir = -transform.forward;          // backstep when no input
-            if (_combat.RequestDodge())
-                _dodgeDir = dir.normalized;
+            if (!_combat.RequestDodge())
+                return false;
+            _dodgeDir = dir.normalized;
+            return true;
         }
 
         Vector3 WishDirection(bool locked)

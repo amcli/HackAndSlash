@@ -2,14 +2,6 @@ using UnityEngine;
 
 namespace ParryArena.Arena
 {
-    /// <summary>The pieces of a built avatar that gameplay code needs to wire up.</summary>
-    public class AvatarParts
-    {
-        public GameObject Root;
-        public WeaponRig Weapon;       // swingable weapon (pivot/blade/trail/hitbox anchor)
-        public Transform HurtboxAnchor; // empty at body centre; Hurtbox component attaches here
-    }
-
     /// <summary>
     /// Builds the greybox avatar (capsule body, sphere head, swingable weapon)
     /// from primitives. One builder for both the player and enemies keeps them
@@ -44,7 +36,17 @@ namespace ParryArena.Arena
                 Root = root,
                 HurtboxAnchor = CreateAnchor(root.transform, "Hurtbox", new Vector3(0f, 1f, 0f)),
                 Weapon = BuildWeapon(root.transform, tint, weaponLength),
+                DodgeTrail = BuildDodgeTrail(root.transform, tint),
             };
+        }
+
+        static TrailRenderer BuildDodgeTrail(Transform root, Color tint)
+        {
+            var anchor = CreateAnchor(root, "DodgeTrail", new Vector3(0f, 1f, 0f));
+            var trail = anchor.gameObject.AddComponent<TrailRenderer>();
+            ConfigureTrail(trail, Color.Lerp(tint, Color.white, 0.25f),
+                time: 0.22f, startWidth: 0.7f, endWidth: 0.1f, startAlpha: 0.35f);
+            return trail;
         }
 
         static WeaponRig BuildWeapon(Transform root, Color tint, float weaponLength)
@@ -63,7 +65,8 @@ namespace ParryArena.Arena
 
             var tip = CreateAnchor(pivot, "Tip", new Vector3(0f, 0f, weaponLength));
             var trail = tip.gameObject.AddComponent<TrailRenderer>();
-            ConfigureTrail(trail, tint);
+            ConfigureTrail(trail, Color.Lerp(tint, Color.white, 0.5f),
+                time: 0.18f, startWidth: 0.16f, endWidth: 0f, startAlpha: 0.7f);
 
             var rig = root.gameObject.AddComponent<WeaponRig>();
             rig.Pivot = pivot;
@@ -76,20 +79,19 @@ namespace ParryArena.Arena
             return rig;
         }
 
-        static void ConfigureTrail(TrailRenderer trail, Color tint)
+        static void ConfigureTrail(TrailRenderer trail, Color color,
+            float time, float startWidth, float endWidth, float startAlpha)
         {
-            trail.time = 0.18f;
-            trail.startWidth = 0.16f;
-            trail.endWidth = 0f;
+            trail.time = time;
+            trail.startWidth = startWidth;
+            trail.endWidth = endWidth;
             trail.minVertexDistance = 0.02f;
             trail.numCapVertices = 2;
             trail.emitting = false;
             trail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             trail.material = new Material(Shader.Find("Sprites/Default"));
-
-            Color c = Color.Lerp(tint, Color.white, 0.5f);
-            trail.startColor = new Color(c.r, c.g, c.b, 0.7f);
-            trail.endColor = new Color(c.r, c.g, c.b, 0f);
+            trail.startColor = new Color(color.r, color.g, color.b, startAlpha);
+            trail.endColor = new Color(color.r, color.g, color.b, 0f);
         }
 
         static Transform CreateAnchor(Transform parent, string name, Vector3 localPosition)

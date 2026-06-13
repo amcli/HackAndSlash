@@ -23,6 +23,7 @@ namespace ParryArena.UI
         public static readonly Color Health = new Color(0.78f, 0.27f, 0.24f, 1f);
         public static readonly Color Stamina = new Color(0.36f, 0.70f, 0.45f, 1f);
         public static readonly Color EnemyHealth = new Color(0.85f, 0.50f, 0.22f, 1f);
+        public static readonly Color Stagger = new Color(0.95f, 0.82f, 0.35f, 1f);
 
         public static readonly Color Good = new Color(0.40f, 0.74f, 0.42f, 1f);
         public static readonly Color Danger = new Color(0.83f, 0.28f, 0.25f, 1f);

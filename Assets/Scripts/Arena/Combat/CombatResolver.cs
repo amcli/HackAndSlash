@@ -9,10 +9,23 @@ namespace ParryArena.Arena
     ///   1. Perfect parry  → negate + stagger the attacker + feedback
     ///   2. Dodge i-frames → negate
     ///   3. Block          → chip damage + stamina drain (guard break at 0)
-    ///   4. Clean hit      → damage + hitstun + knockback
+    ///   4. Riposte        → huge damage if the defender is staggered + cinematic punch
+    ///   5. Clean hit      → damage + small stagger build + hitstun + knockback
+    ///
+    /// Stagger only ever accrues on the enemy (the player has no meter), so the
+    /// AddStagger calls are no-ops on the player's combat.
     /// </summary>
     public static class CombatResolver
     {
+        const float ParryStaggerGain = 40f;
+        const float RiposteMultiplier = 3.5f;
+
+        // Spark colours for each impact (built in code, no VFX assets).
+        static readonly Color ParrySpark = new Color(0.55f, 0.80f, 1.00f);   // parry blue
+        static readonly Color BlockSpark = new Color(0.82f, 0.86f, 0.95f);   // steel
+        static readonly Color HitSpark = new Color(1.00f, 0.45f, 0.30f);     // warm red
+        static readonly Color RiposteSpark = new Color(1.00f, 0.82f, 0.35f); // gold
+
         public static void Resolve(Hitbox attacker, Hurtbox target)
         {
             if (target.Team == attacker.Team || target.Health == null || target.Health.IsDead)
@@ -20,14 +33,22 @@ namespace ParryArena.Arena
 
             var defender = target.Combat;
 
+            // Contact point: the blade hitbox sits where the swing connects.
+            Vector3 contact = attacker.transform.position;
+
             // 1. Perfect parry.
             if (defender != null && defender.IsParrying && attacker.Parryable)
             {
                 defender.OnParrySuccess();
                 if (attacker.Owner != null)
+                {
                     attacker.Owner.OnGotParried();
+                    attacker.Owner.AddStagger(ParryStaggerGain);
+                }
                 Hitstop.Freeze(0.09f);
                 ScreenShake.Shake(0.6f);
+                CombatAudio.Play(CombatSound.Parry);
+                ImpactVfx.Play(contact, ParrySpark, scale: 1.2f, count: 22);
                 return;
             }
 
@@ -39,18 +60,37 @@ namespace ParryArena.Arena
             if (defender != null && defender.IsBlocking && attacker.Blockable)
             {
                 defender.OnBlocked(attacker.Damage);
+                CombatAudio.Play(CombatSound.Block);
+                ImpactVfx.Play(contact, BlockSpark, scale: 0.8f, count: 10);
                 return;
             }
 
-            // 4. Clean hit.
+            // 4. Riposte — the defender is staggered and wide open.
+            if (defender != null && defender.IsStaggered)
+            {
+                target.Health.TakeDamage(attacker.Damage * RiposteMultiplier);
+                defender.OnRiposted();
+                Hitstop.Freeze(0.18f);
+                ScreenShake.Shake(0.9f);
+                CameraPunch.Punch(1f);
+                CombatAudio.Play(CombatSound.Riposte);
+                ImpactVfx.Play(contact, RiposteSpark, scale: 1.6f, count: 32);
+                return;
+            }
+
+            // 5. Clean hit — the hit VFX/SFX fire here for both player and enemy.
             target.Health.TakeDamage(attacker.Damage);
             if (defender != null)
             {
+                defender.AddStagger(attacker.StaggerDamage);
                 Vector3 dir = attacker.Owner != null
                     ? defender.transform.position - attacker.Owner.transform.position
                     : Vector3.zero;
                 defender.OnHit(dir);
+                ScreenShake.Shake(0.12f);
             }
+            CombatAudio.Play(CombatSound.Hit);
+            ImpactVfx.Play(contact, HitSpark, scale: 1f, count: 16);
         }
     }
 }

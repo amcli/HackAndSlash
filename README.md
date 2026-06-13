@@ -66,20 +66,35 @@ These are unused now that the project was stripped to bare-bones; safe to delete
 All gameplay/UI content is **built from code** so the scene files stay empty and
 free of fragile serialized references. Scripts live under `Assets/Scripts`:
 
+Namespaces are area-level (`ParryArena.Core/.Data/.UI/.Arena`) and intentionally
+broader than folders — the folders organise files; the namespaces are the
+visibility boundaries.
+
 ```
 Scripts/
-  Bootstrap/        AppBootstrap (auto entry point) + SceneComposer (composition root)
-  Core/             Cross-scene services: GameApp, GameSession, GameSettings,
-                    SceneFlow, SceneId, UICursor/AppQuit
-  Data/             ScriptableObjects: LoadoutDefinition, EnemyDefinition,
-                    + GameContent (authored-asset-or-built-in-default provider)
-  UI/               UIFactory + UITheme (DRY widget builders), UIScreen base,
-                    MenuController router
-    Screens/        MainMenu, Settings, SelectionScreen<T> base, Loadout/Enemy select
-    Arena/          ArenaHUD, PauseScreen, ResultScreen
-  Arena/            ArenaController, PlayerController, ThirdPersonCamera,
-                    Health, EnemyActor, ActorVisualFactory
+  Bootstrap/          AppBootstrap (auto entry point) + SceneComposer (composition root)
+  Core/               Cross-scene services: GameApp, GameSession, MatchResult,
+                      GameSettings, SceneFlow, SceneId, UICursor, AppQuit
+  Data/               ScriptableObjects: LoadoutDefinition, EnemyDefinition,
+                      + GameContent (authored-asset-or-built-in-default provider)
+  UI/                 UIFactory + UITheme (DRY widget builders), UIScreen, StatBar
+    Menu/             MenuController router + MainMenu/Settings/SelectionScreen<T>/
+                      Loadout/Enemy select
+    Hud/              ArenaHUD, PauseScreen, ResultScreen
+  Arena/              ArenaController (runs the match) + ArenaStage (greybox world)
+                      / CombatantFactory (assembles the two fighters) / Combatants
+    Actors/           Health, WeaponRig, ActorVisualFactory + AvatarParts
+    Controllers/      PlayerController, EnemyController (the actor brains)
+    Combat/           ActorCombat (FSM) + SwingProfile, CombatResolver, Hitbox,
+                      Hurtbox, StaggerMeter, CombatTeam, CombatState
+    Camera/           ThirdPersonCamera (orbit + lock-on)
+    Feedback/         Hitstop, ScreenShake, CameraPunch, CombatAudio + CombatSound
+                      (procedural SFX), ImpactVfx (spark/hit bursts),
+                      CombatDebug + DebugVolume (box viz)
 ```
+
+> Every public type lives in its own file named after it, so any class, enum, or
+> struct is findable by filename.
 
 ## Architecture notes (the engineering story)
 
@@ -88,6 +103,11 @@ Scripts/
   persistent `GameApp` (session + settings), and hands each loaded scene to
   `SceneComposer`, which is the single place that maps a scene to its controller.
   No manually-wired manager objects in scenes.
+
+- **Construction split from runtime.** Each scene controller delegates *building*
+  to stateless factories — the arena's world to `ArenaStage`, its fighters to
+  `CombatantFactory`, and every UI panel to `UIFactory.CreateScreen` — so the
+  controllers keep only runtime state and match flow.
 
 - **Code-built UI, on purpose.** Scenes are empty stages; controllers construct
   their world/UI at runtime. This removes whole classes of "missing reference"
@@ -115,7 +135,8 @@ Scripts/
 
 ## Next steps (per the plan)
 
-1. **M1 — the parry feel loop**: replace the placeholder attack with perfect
-   parry / block / dodge + i-frames / stamina / hitstop / stagger meter / riposte.
-2. **M2** — move attacks into `AttackSO` frame data + animation events + input buffering.
+1. ~~**M1 — the parry feel loop**~~ *(built)*: perfect parry / block / dodge +
+   i-frames / stamina / hitstop / stagger meter → riposte / charged heavy strike,
+   plus the feel layer — procedural SFX, spark + hit VFX, and input buffering.
+2. **M2** — move attacks into `AttackSO` frame data + animation events.
 3. **M3** — the one-brain, data-driven enemy AI reading `EnemyDefinition`.
