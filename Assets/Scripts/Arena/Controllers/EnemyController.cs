@@ -40,7 +40,7 @@ namespace ParryArena.Arena
                 return;
 
             if (_combat != null)
-                transform.position += _combat.KnockbackVelocity * Time.deltaTime;
+                transform.position += _combat.ImpulseVelocity * Time.deltaTime;
 
             FacePlayer();
 

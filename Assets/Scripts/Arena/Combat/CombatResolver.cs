@@ -21,10 +21,11 @@ namespace ParryArena.Arena
         const float RiposteMultiplier = 3.5f;
 
         // Spark colours for each impact (built in code, no VFX assets).
-        static readonly Color ParrySpark = new Color(0.55f, 0.80f, 1.00f);   // parry blue
-        static readonly Color BlockSpark = new Color(0.82f, 0.86f, 0.95f);   // steel
-        static readonly Color HitSpark = new Color(1.00f, 0.45f, 0.30f);     // warm red
-        static readonly Color RiposteSpark = new Color(1.00f, 0.82f, 0.35f); // gold
+        static readonly Color ParrySpark = new Color(0.55f, 0.80f, 1.00f);     // parry blue
+        static readonly Color ForesightSpark = new Color(0.70f, 0.90f, 1.00f); // brighter cyan flash
+        static readonly Color BlockSpark = new Color(0.82f, 0.86f, 0.95f);     // steel
+        static readonly Color HitSpark = new Color(1.00f, 0.45f, 0.30f);       // warm red
+        static readonly Color RiposteSpark = new Color(1.00f, 0.82f, 0.35f);   // gold
 
         public static void Resolve(Hitbox attacker, Hurtbox target)
         {
@@ -35,6 +36,29 @@ namespace ParryArena.Arena
 
             // Contact point: the blade hitbox sits where the swing connects.
             Vector3 contact = attacker.transform.position;
+
+            // Is this landing blow an empowered foresight counter? It gets its own
+            // signature VFX/SFX wherever it resolves.
+            bool foresightHit = attacker.Owner != null && attacker.Owner.IsForesightCounter;
+
+            // 0. Foresight slash — the read pays off: absorb the hit and the
+            //    defender immediately launches its empowered counter (the counter
+            //    swing then lands through this same pipeline as a clean hit).
+            if (defender != null && defender.IsInForesightWindow && attacker.Parryable)
+            {
+                defender.OnForesightSuccess();
+                if (attacker.Owner != null)
+                {
+                    attacker.Owner.OnGotParried();
+                    attacker.Owner.AddStagger(ParryStaggerGain);
+                }
+                Hitstop.Freeze(0.12f);
+                ScreenShake.Shake(0.7f);
+                CameraPunch.Punch(0.7f);
+                CombatAudio.Play(CombatSound.Parry);
+                ImpactVfx.Play(contact, ForesightSpark, scale: 1.4f, count: 26);
+                return;
+            }
 
             // 1. Perfect parry.
             if (defender != null && defender.IsParrying && attacker.Parryable)
@@ -74,7 +98,10 @@ namespace ParryArena.Arena
                 ScreenShake.Shake(0.9f);
                 CameraPunch.Punch(1f);
                 CombatAudio.Play(CombatSound.Riposte);
-                ImpactVfx.Play(contact, RiposteSpark, scale: 1.6f, count: 32);
+                if (foresightHit)
+                    ImpactVfx.PlayForesightHit(contact);
+                else
+                    ImpactVfx.Play(contact, RiposteSpark, scale: 1.6f, count: 32);
                 return;
             }
 
@@ -87,10 +114,23 @@ namespace ParryArena.Arena
                     ? defender.transform.position - attacker.Owner.transform.position
                     : Vector3.zero;
                 defender.OnHit(dir);
-                ScreenShake.Shake(0.12f);
+                ScreenShake.Shake(foresightHit ? 0.4f : 0.12f);
             }
-            CombatAudio.Play(CombatSound.Hit);
-            ImpactVfx.Play(contact, HitSpark, scale: 1f, count: 16);
+
+            if (foresightHit)
+            {
+                // A landed foresight counter: signature flash + a beat of freeze
+                // and a punch so it lands hard even on a non-staggered enemy.
+                CombatAudio.Play(CombatSound.Riposte);
+                ImpactVfx.PlayForesightHit(contact);
+                Hitstop.Freeze(0.10f);
+                CameraPunch.Punch(0.5f);
+            }
+            else
+            {
+                CombatAudio.Play(CombatSound.Hit);
+                ImpactVfx.Play(contact, HitSpark, scale: 1f, count: 16);
+            }
         }
     }
 }

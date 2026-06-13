@@ -51,6 +51,18 @@ namespace ParryArena.Arena
         [SerializeField] float _heavyDamageMultiplier = 2.2f;
         [SerializeField] float _heavyStaggerMultiplier = 2.5f;
 
+        [Header("Foresight slash (read → counter)")]
+        [SerializeField] float _foresightStartup = 0.05f;        // raise into the ready stance
+        [SerializeField] float _foresightWindow = 0.25f;         // counter window: absorb a hit here
+        [SerializeField] float _foresightStaminaCost = 20f;
+        [SerializeField] float _foresightCooldown = 1.2f;
+        [SerializeField] float _foresightCounterDamageMultiplier = 3.0f;
+        [SerializeField] float _foresightCounterStaggerMultiplier = 3.0f;
+        [SerializeField] float _foresightBackstepSpeed = 7f;     // snappy hop back so the read reads clearly
+        [SerializeField] float _foresightLungeSpeed = 11f;       // lunge forward into the counter to re-close
+        // NOTE: too large a backstep can carry you out of the enemy's reach so no
+        // hit overlaps the window — turn this down if the counter feels unreliable.
+
         [Header("Staggered (when this actor is broken)")]
         [SerializeField] float _staggerDuration = 2.5f;
 
@@ -88,8 +100,10 @@ namespace ParryArena.Arena
         Color _bladeBaseColor = Color.white;
 
         bool _guardHeld;
-        Vector3 _knockbackVelocity;
+        Vector3 _impulseVelocity; // decaying scripted body motion: knockback, foresight backstep/lunge
         float _dodgeCooldownRemaining;
+        float _foresightCooldownRemaining;
+        bool _foresightCounter; // the next EnterActive is an empowered foresight counter
         TrailRenderer _dodgeTrail;
 
         [SerializeField] float _attackDamage = 5f;
@@ -115,11 +129,21 @@ namespace ParryArena.Arena
             _timer >= _parryStartup &&
             _timer < _parryStartup + _parryActiveWindow;
 
+        /// <summary>True during the foresight slash's counter window — a hit landed here is absorbed.</summary>
+        public bool IsInForesightWindow =>
+            _state == CombatState.Foresight &&
+            _timer >= _foresightStartup &&
+            _timer < _foresightStartup + _foresightWindow;
+
         public float Stamina => _stamina;
         public float MaxStamina => _maxStamina;
         public float DodgeNormalizedTime =>
             _state == CombatState.Dodge ? Mathf.Clamp01(_timer / _dodgeDuration) : 0f;
-        public Vector3 KnockbackVelocity => _knockbackVelocity;
+        /// <summary>Decaying scripted body velocity the controller applies (knockback, foresight backstep/lunge).</summary>
+        public Vector3 ImpulseVelocity => _impulseVelocity;
+
+        /// <summary>True while an empowered foresight counter swing is connecting — used to give its hit a special look.</summary>
+        public bool IsForesightCounter => _foresightCounter && _state == CombatState.Active;
 
         public void Configure(WeaponRig rig, Hitbox hitbox, Health health)
         {
@@ -223,12 +247,55 @@ namespace ParryArena.Arena
             return true;
         }
 
+        /// <summary>
+        /// Foresight slash: a read. Enter a brief counter window (see
+        /// <see cref="IsInForesightWindow"/>); absorbing a hit there fires the
+        /// empowered counter via <see cref="OnForesightSuccess"/>, otherwise it
+        /// resolves into an ordinary slash. Allowed from idle or out of a guard so
+        /// the RMB→LMB command can cancel the just-started parry.
+        /// </summary>
+        public bool RequestForesightSlash()
+        {
+            if (_state != CombatState.Idle && _state != CombatState.Parry && _state != CombatState.Block)
+                return false;
+            if (_foresightCooldownRemaining > 0f)
+                return false;
+            if (!SpendStamina(_foresightStaminaCost))
+                return false;
+
+            _state = CombatState.Foresight;
+            _timer = 0f;
+            _foresightCounter = false;
+            _foresightCooldownRemaining = _foresightCooldown;
+            EndSwingVisuals();
+            ApplyPose(_restPose);
+            ApplyImpulse(-transform.forward, _foresightBackstepSpeed); // snappy hop back = clear "it triggered"
+            return true;
+        }
+
         public void SetGuardHeld(bool held) => _guardHeld = held;
 
         // ---- Reactions ---------------------------------------------------------
 
         /// <summary>Called on this actor when it successfully parries an incoming attack.</summary>
         public void OnParrySuccess() => _flashTimer = 0.12f;
+
+        /// <summary>
+        /// Called on this actor when a hit is absorbed during its foresight
+        /// window: flash, then immediately launch the empowered counter slash
+        /// (an Active swing scaled by the counter multipliers, see
+        /// <see cref="EnterActive"/>).
+        /// </summary>
+        public void OnForesightSuccess()
+        {
+            if (_state != CombatState.Foresight)
+                return;
+            _flashTimer = 0.16f;
+            _foresightCounter = true;
+            ApplyImpulse(transform.forward, _foresightLungeSpeed); // lunge in so the counter re-closes the gap
+            BeginSwing();
+            EnterActive();
+        }
 
         /// <summary>Called on the attacker when its swing is parried — dump into recovery (basic stagger).</summary>
         public void OnGotParried()
@@ -293,10 +360,12 @@ namespace ParryArena.Arena
             if (_flashTimer > 0f)
                 _flashTimer -= Time.unscaledDeltaTime;
 
-            _knockbackVelocity = Vector3.MoveTowards(_knockbackVelocity, Vector3.zero, _knockbackDecay * dt);
+            _impulseVelocity = Vector3.MoveTowards(_impulseVelocity, Vector3.zero, _knockbackDecay * dt);
 
             if (_dodgeCooldownRemaining > 0f)
                 _dodgeCooldownRemaining -= dt;
+            if (_foresightCooldownRemaining > 0f)
+                _foresightCooldownRemaining -= dt;
 
             // Stamina regenerates except while actively guarding.
             if (_usesStamina && _state != CombatState.Block && _state != CombatState.Parry)
@@ -360,10 +429,23 @@ namespace ParryArena.Arena
                     if (_timer >= _staggerDuration)
                         EnterIdle();
                     break;
+
+                case CombatState.Foresight:
+                    UpdateForesightPose();
+                    // Window elapsed without absorbing a hit → the read whiffs
+                    // into an ordinary slash (not a counter).
+                    if (_timer >= _foresightStartup + _foresightWindow)
+                    {
+                        BeginSwing();
+                        EnterActive();
+                    }
+                    break;
             }
 
             if (_dodgeTrail != null)
-                _dodgeTrail.emitting = _state == CombatState.Dodge;
+                _dodgeTrail.emitting = _state == CombatState.Dodge
+                    || _state == CombatState.Foresight       // streak on the backstep
+                    || IsForesightCounter;                   // and on the lunge
 
             UpdateBladeColor();
         }
@@ -376,6 +458,16 @@ namespace ParryArena.Arena
                 ApplyPose(_guardPose);
             else
                 ApplyPose(Vector3.Lerp(_guardPose, _restPose, Smooth(_timer - _parryStartup - _parryActiveWindow, _parryRecovery)));
+        }
+
+        void UpdateForesightPose()
+        {
+            // Raise into the cross-body ready stance, then hold it through the
+            // counter window so the read is readable.
+            if (_timer < _foresightStartup)
+                ApplyPose(Vector3.Lerp(_restPose, _guardPose, Smooth(_timer, _foresightStartup)));
+            else
+                ApplyPose(_guardPose);
         }
 
         void BeginSwing()
@@ -392,9 +484,15 @@ namespace ParryArena.Arena
             _timer = 0f;
             if (_hitbox != null)
             {
-                float damage = _attackDamage * Mathf.Lerp(1f, _heavyDamageMultiplier, _chargeFractionForSwing);
-                float stagger = _attackStagger * Mathf.Lerp(1f, _heavyStaggerMultiplier, _chargeFractionForSwing);
-                _hitbox.SetSwingPower(damage, stagger);
+                // Foresight counter overrides the charge scaling with its own
+                // (bigger) multipliers; otherwise damage scales with hold time.
+                float damageMult = _foresightCounter
+                    ? _foresightCounterDamageMultiplier
+                    : Mathf.Lerp(1f, _heavyDamageMultiplier, _chargeFractionForSwing);
+                float staggerMult = _foresightCounter
+                    ? _foresightCounterStaggerMultiplier
+                    : Mathf.Lerp(1f, _heavyStaggerMultiplier, _chargeFractionForSwing);
+                _hitbox.SetSwingPower(_attackDamage * damageMult, _attackStagger * staggerMult);
                 _hitbox.Activate();
             }
             if (_rig != null && _rig.Trail != null)
@@ -432,10 +530,15 @@ namespace ParryArena.Arena
             ApplyPose(_restPose);
             _state = CombatState.Hitstun;
             _timer = 0f;
+            ApplyImpulse(direction, _knockbackSpeed);
+        }
 
-            direction.y = 0f;
-            if (direction.sqrMagnitude > 0.0001f)
-                _knockbackVelocity = direction.normalized * _knockbackSpeed;
+        /// <summary>Sets the decaying scripted body velocity (knockback, foresight backstep/lunge).</summary>
+        void ApplyImpulse(Vector3 worldDirection, float speed)
+        {
+            worldDirection.y = 0f;
+            if (worldDirection.sqrMagnitude > 0.0001f)
+                _impulseVelocity = worldDirection.normalized * speed;
         }
 
         void EnterIdle()
@@ -443,6 +546,7 @@ namespace ParryArena.Arena
             _state = CombatState.Idle;
             _timer = 0f;
             _chargeFractionForSwing = 0f;
+            _foresightCounter = false;
             ApplyPose(_restPose);
         }
 
@@ -497,9 +601,17 @@ namespace ParryArena.Arena
                             : _bladeBaseColor;
                         break;
                     case CombatState.Active:
-                        color = TelegraphWindup
-                            ? TelegraphColor
-                            : Color.Lerp(_bladeBaseColor, ChargeColor, _chargeFractionForSwing);
+                        if (_foresightCounter)
+                            color = ParryColor;                  // empowered counter glows blue
+                        else
+                            color = TelegraphWindup
+                                ? TelegraphColor
+                                : Color.Lerp(_bladeBaseColor, ChargeColor, _chargeFractionForSwing);
+                        break;
+                    case CombatState.Foresight:
+                        color = IsInForesightWindow
+                            ? ParryColor
+                            : Color.Lerp(_bladeBaseColor, ParryColor, 0.3f);
                         break;
                     default:
                         color = _bladeBaseColor;

@@ -16,6 +16,7 @@ namespace ParryArena.Arena
         Dodge,
         Hitstun,
         Charge,
-        Staggered
+        Staggered,
+        Foresight
     }
 }
