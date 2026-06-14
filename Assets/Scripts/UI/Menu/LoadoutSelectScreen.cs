@@ -18,6 +18,13 @@ namespace ParryArena.UI
             $"<b>{item.DisplayName}</b>\n{item.Description}\n\n" +
             $"<color=#9AA2AC>Health</color> {item.MaxHealth:0}    " +
             $"<color=#9AA2AC>Stamina</color> {item.MaxStamina:0}    " +
-            $"<color=#9AA2AC>Damage</color> {item.AttackDamage:0}";
+            $"<color=#9AA2AC>Damage</color> {BaseDamage(item):0}    " +
+            $"<color=#9AA2AC>Combo</color> x{ComboLength(item)}";
+
+        // Representative numbers from the moveset (first light hit + string length).
+        static float BaseDamage(LoadoutDefinition item) =>
+            item.Combo != null && item.Combo.Length > 0 ? item.Combo[0].Damage : 0f;
+
+        static int ComboLength(LoadoutDefinition item) => item.Combo?.Length ?? 0;
     }
 }

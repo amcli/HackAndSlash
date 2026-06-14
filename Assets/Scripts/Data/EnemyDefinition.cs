@@ -17,7 +17,11 @@ namespace ParryArena.Data
         [TextArea] public string Description = "";
 
         [Header("Stats")]
-        public float MaxHealth = 150f;
+        public float MaxHealth = 500f;
+
+        [Header("Moveset")]
+        [Tooltip("Attacks this enemy can throw. The placeholder AI just loops the first one.")]
+        public AttackDefinition[] Attacks;
 
         [Header("Placeholder hostility")]
         [Tooltip("Health drained from the player per second while inside ContactRadius. 0 = passive target dummy.")]

@@ -15,6 +15,8 @@ namespace ParryArena.Arena
     {
         [SerializeField] float _turnSpeed = 6f;
         [SerializeField] float _attackInterval = 1.5f;
+        [Tooltip("Seeded from the EnemyDefinition on spawn; drag it in Play mode to tune the fight live.")]
+        [SerializeField] float _maxHealth = 150f;
 
         EnemyDefinition _definition;
         Transform _target;
@@ -30,7 +32,8 @@ namespace ParryArena.Arena
             _target = target;
             _combat = combat;
             Health = GetComponent<Health>();
-            Health.Init(definition.MaxHealth);
+            _maxHealth = definition.MaxHealth;   // seed the live-tunable knob from data
+            Health.Init(_maxHealth);
             _attackCooldown = _attackInterval;
         }
 
@@ -38,6 +41,11 @@ namespace ParryArena.Arena
         {
             if (_target == null || Health.IsDead)
                 return;
+
+            // Live tuning: re-apply (and refill) if max health was dragged in the
+            // Inspector during Play. No-ops once Health.Max matches the field again.
+            if (!Mathf.Approximately(_maxHealth, Health.Max))
+                Health.Init(_maxHealth);
 
             if (_combat != null)
                 transform.position += _combat.ImpulseVelocity * Time.deltaTime;

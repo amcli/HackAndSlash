@@ -37,28 +37,22 @@ namespace ParryArena.Arena
             // Contact point: the blade hitbox sits where the swing connects.
             Vector3 contact = attacker.transform.position;
 
+            // The foresight sensor is a phantom parked at the trigger spot: it ONLY
+            // ever absorbs (during the window), never takes a normal hit.
+            if (target.IsForesightSensor)
+            {
+                TryForesightAbsorb(attacker, defender, contact);
+                return;
+            }
+
             // Is this landing blow an empowered foresight counter? It gets its own
             // signature VFX/SFX wherever it resolves.
             bool foresightHit = attacker.Owner != null && attacker.Owner.IsForesightCounter;
 
-            // 0. Foresight slash — the read pays off: absorb the hit and the
-            //    defender immediately launches its empowered counter (the counter
-            //    swing then lands through this same pipeline as a clean hit).
-            if (defender != null && defender.IsInForesightWindow && attacker.Parryable)
-            {
-                defender.OnForesightSuccess();
-                if (attacker.Owner != null)
-                {
-                    attacker.Owner.OnGotParried();
-                    attacker.Owner.AddStagger(ParryStaggerGain);
-                }
-                Hitstop.Freeze(0.12f);
-                ScreenShake.Shake(0.7f);
-                CameraPunch.Punch(0.7f);
-                CombatAudio.Play(CombatSound.Parry);
-                ImpactVfx.Play(contact, ForesightSpark, scale: 1.4f, count: 26);
+            // 0. Foresight slash — the read pays off (also covers the real hurtbox
+            //    when it hasn't dashed clear yet).
+            if (TryForesightAbsorb(attacker, defender, contact))
                 return;
-            }
 
             // 1. Perfect parry.
             if (defender != null && defender.IsParrying && attacker.Parryable)
@@ -131,6 +125,31 @@ namespace ParryArena.Arena
                 CombatAudio.Play(CombatSound.Hit);
                 ImpactVfx.Play(contact, HitSpark, scale: 1f, count: 16);
             }
+        }
+
+        /// <summary>
+        /// The foresight absorb: if the defender is in its counter window and the
+        /// hit is parryable, negate it, launch the empowered counter, stagger the
+        /// attacker, and play the feedback. Returns true if it fired. Shared by the
+        /// phantom sensor and the real hurtbox.
+        /// </summary>
+        static bool TryForesightAbsorb(Hitbox attacker, ActorCombat defender, Vector3 contact)
+        {
+            if (defender == null || !defender.IsInForesightWindow || !attacker.Parryable)
+                return false;
+
+            defender.OnForesightSuccess();
+            if (attacker.Owner != null)
+            {
+                attacker.Owner.OnGotParried();
+                attacker.Owner.AddStagger(ParryStaggerGain);
+            }
+            Hitstop.Freeze(0.12f);
+            ScreenShake.Shake(0.7f);
+            CameraPunch.Punch(0.7f);
+            CombatAudio.Play(CombatSound.Parry);
+            ImpactVfx.Play(contact, ForesightSpark, scale: 1.4f, count: 26);
+            return true;
         }
     }
 }

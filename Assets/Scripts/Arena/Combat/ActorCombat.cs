@@ -1,3 +1,4 @@
+using ParryArena.Data;
 using UnityEngine;
 
 namespace ParryArena.Arena
@@ -18,10 +19,8 @@ namespace ParryArena.Arena
     /// </summary>
     public class ActorCombat : MonoBehaviour
     {
-        [Header("Swing timing (seconds)")]
-        [SerializeField] float _windup = 0.15f;
-        [SerializeField] float _active = 0.12f;
-        [SerializeField] float _recovery = 0.25f;
+        [Header("Light combo")]
+        [SerializeField] float _comboWindow = 0.7f; // re-press within this to continue the string; else it resets
 
         [Header("Parry timing (seconds)")]
         [SerializeField] float _parryStartup = 0.04f;
@@ -60,8 +59,7 @@ namespace ParryArena.Arena
         [SerializeField] float _foresightCounterStaggerMultiplier = 3.0f;
         [SerializeField] float _foresightBackstepSpeed = 7f;     // snappy hop back so the read reads clearly
         [SerializeField] float _foresightLungeSpeed = 11f;       // lunge forward into the counter to re-close
-        // NOTE: too large a backstep can carry you out of the enemy's reach so no
-        // hit overlaps the window — turn this down if the counter feels unreliable.
+        [SerializeField] float _foresightSensorHeight = 1f;      // body-centre offset for the phantom (matches the hurtbox)
 
         [Header("Staggered (when this actor is broken)")]
         [SerializeField] float _staggerDuration = 2.5f;
@@ -74,13 +72,6 @@ namespace ParryArena.Arena
         /// <summary>Enemy attacks colour the blade during windup so the swing is readable.</summary>
         public bool TelegraphWindup;
 
-        static readonly SwingProfile[] Swings =
-        {
-            new SwingProfile(new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f)),    // overhead, top -> bottom
-            new SwingProfile(new Vector3(-90f, 55f, 0f), new Vector3(40f, -55f, 0f)),  // diagonal, upper-right -> lower-left
-            new SwingProfile(new Vector3(-10f, 80f, 0f), new Vector3(-10f, -80f, 0f)), // horizontal, right -> left
-        };
-
         static readonly Color ParryColor = new Color(0.40f, 0.72f, 1.00f);
         static readonly Color TelegraphColor = new Color(0.95f, 0.25f, 0.20f);
         static readonly Color ChargeColor = new Color(1.00f, 0.82f, 0.35f);
@@ -92,8 +83,10 @@ namespace ParryArena.Arena
 
         CombatState _state = CombatState.Idle;
         float _timer;
-        int _swingIndex;
-        SwingProfile _swing;
+        AttackDefinition[] _moveset;
+        AttackDefinition _currentAttack;
+        int _comboStep;        // index of the next attack in the combo string
+        float _comboExpiry;    // unscaled time after which the string lapses back to the start
         Vector3 _currentPose;
         Vector3 _recoveryStartPose;
         float _flashTimer;
@@ -104,17 +97,15 @@ namespace ParryArena.Arena
         float _dodgeCooldownRemaining;
         float _foresightCooldownRemaining;
         bool _foresightCounter; // the next EnterActive is an empowered foresight counter
+        GameObject _foresightSensor; // phantom hurtbox parked at the trigger spot during the read
         TrailRenderer _dodgeTrail;
 
-        [SerializeField] float _attackDamage = 5f;
-        float _attackStagger;
         float _chargeFractionForSwing;
 
         // Stamina (owned here so attack/block/dodge costs live in one place).
         bool _usesStamina;
         float _maxStamina = 100f;
         float _stamina = 100f;
-        float _attackStaminaCost = 16f;
 
         public CombatState State => _state;
         public bool IsIdle => _state == CombatState.Idle;
@@ -161,41 +152,37 @@ namespace ParryArena.Arena
                 _rig.Trail.emitting = false;
         }
 
-        public void ConfigureStamina(bool usesStamina, float maxStamina, float attackCost)
+        public void ConfigureStamina(bool usesStamina, float maxStamina)
         {
             _usesStamina = usesStamina;
             _maxStamina = Mathf.Max(1f, maxStamina);
             _stamina = _maxStamina;
-            _attackStaminaCost = attackCost;
         }
 
-        public void ConfigureOffense(float attackDamage, float attackStagger)
+        /// <summary>The ordered attacks this actor swings (light combo for the player, loop for the AI).</summary>
+        public void SetMoveset(AttackDefinition[] moveset)
         {
-            _attackDamage = attackDamage;
-            _attackStagger = attackStagger;
-        }
-
-        public void SetSwingTimings(float windup, float active, float recovery)
-        {
-            _windup = windup;
-            _active = active;
-            _recovery = recovery;
+            _moveset = moveset;
+            _comboStep = 0;
         }
 
         public void SetDodgeTrail(TrailRenderer trail) => _dodgeTrail = trail;
         public void SetStaggerMeter(StaggerMeter meter) => _stagger = meter;
+
+        /// <summary>The detached phantom hurtbox this actor parks at its trigger spot during a foresight read.</summary>
+        public void SetForesightSensor(GameObject sensor) => _foresightSensor = sensor;
 
         // ---- Input / requests --------------------------------------------------
 
         /// <summary>Timed-windup attack used by AI. The player uses charge instead.</summary>
         public bool RequestAttack()
         {
-            if (_state != CombatState.Idle)
+            if (!HasMoveset || _state != CombatState.Idle)
                 return false;
-            if (!SpendStamina(_attackStaminaCost))
+            if (!SpendStamina(CurrentComboAttack().StaminaCost))
                 return false;
 
-            BeginSwing();
+            BeginComboSwing();
             _state = CombatState.Windup;
             return true;
         }
@@ -203,12 +190,13 @@ namespace ParryArena.Arena
         /// <summary>Player presses LMB: wind the blade up and start charging.</summary>
         public bool RequestChargeStart()
         {
-            if (_state != CombatState.Idle)
+            // From idle, or cancelling a mid-combo recovery to chain the next hit.
+            if (!HasMoveset || (_state != CombatState.Idle && !CanComboCancel()))
                 return false;
-            if (!SpendStamina(_attackStaminaCost))
+            if (!SpendStamina(CurrentComboAttack().StaminaCost))
                 return false;
 
-            BeginSwing();
+            BeginComboSwing();
             _state = CombatState.Charge;
             return true;
         }
@@ -256,6 +244,8 @@ namespace ParryArena.Arena
         /// </summary>
         public bool RequestForesightSlash()
         {
+            if (!HasMoveset)
+                return false;
             if (_state != CombatState.Idle && _state != CombatState.Parry && _state != CombatState.Block)
                 return false;
             if (_foresightCooldownRemaining > 0f)
@@ -269,6 +259,16 @@ namespace ParryArena.Arena
             _foresightCooldownRemaining = _foresightCooldown;
             EndSwingVisuals();
             ApplyPose(_restPose);
+
+            // Drop the phantom at our current (original) spot, then dash clear — the
+            // read is judged against the phantom, not the body we're moving away.
+            if (_foresightSensor != null)
+            {
+                _foresightSensor.transform.SetPositionAndRotation(
+                    transform.position + Vector3.up * _foresightSensorHeight, transform.rotation);
+                _foresightSensor.SetActive(true);
+            }
+
             ApplyImpulse(-transform.forward, _foresightBackstepSpeed); // snappy hop back = clear "it triggered"
             return true;
         }
@@ -293,7 +293,7 @@ namespace ParryArena.Arena
             _flashTimer = 0.16f;
             _foresightCounter = true;
             ApplyImpulse(transform.forward, _foresightLungeSpeed); // lunge in so the counter re-closes the gap
-            BeginSwing();
+            BeginSwing(FinisherAttack());   // the counter always swings the dramatic finisher
             EnterActive();
         }
 
@@ -371,27 +371,31 @@ namespace ParryArena.Arena
             if (_usesStamina && _state != CombatState.Block && _state != CombatState.Parry)
                 _stamina = Mathf.Min(_maxStamina, _stamina + _staminaRegenPerSecond * dt);
 
+            // The combo string lapses back to the first hit if you don't continue it.
+            if (_state == CombatState.Idle && _comboStep != 0 && Time.unscaledTime > _comboExpiry)
+                _comboStep = 0;
+
             switch (_state)
             {
                 case CombatState.Charge:
-                    ApplyPose(Vector3.Lerp(_restPose, _swing.Windup, Smooth(_timer, _chargeRaiseTime)));
+                    ApplyPose(Vector3.Lerp(_restPose, _currentAttack.WindupPose, Smooth(_timer, _chargeRaiseTime)));
                     break;
 
                 case CombatState.Windup:
-                    ApplyPose(Vector3.Lerp(_restPose, _swing.Windup, Smooth(_timer, _windup)));
-                    if (_timer >= _windup)
+                    ApplyPose(Vector3.Lerp(_restPose, _currentAttack.WindupPose, Smooth(_timer, _currentAttack.Windup)));
+                    if (_timer >= _currentAttack.Windup)
                         EnterActive();
                     break;
 
                 case CombatState.Active:
-                    ApplyPose(Vector3.Lerp(_swing.Windup, _swing.ActiveEnd, Smooth(_timer, _active)));
-                    if (_timer >= _active)
+                    ApplyPose(Vector3.Lerp(_currentAttack.WindupPose, _currentAttack.ActiveEndPose, Smooth(_timer, _currentAttack.Active)));
+                    if (_timer >= _currentAttack.Active)
                         EnterRecovery();
                     break;
 
                 case CombatState.Recovery:
-                    ApplyPose(Vector3.Lerp(_recoveryStartPose, _restPose, Smooth(_timer, _recovery)));
-                    if (_timer >= _recovery)
+                    ApplyPose(Vector3.Lerp(_recoveryStartPose, _restPose, Smooth(_timer, _currentAttack.Recovery)));
+                    if (_timer >= _currentAttack.Recovery)
                         EnterIdle();
                     break;
 
@@ -436,7 +440,7 @@ namespace ParryArena.Arena
                     // into an ordinary slash (not a counter).
                     if (_timer >= _foresightStartup + _foresightWindow)
                     {
-                        BeginSwing();
+                        BeginComboSwing();   // wasted read → an ordinary slash
                         EnterActive();
                     }
                     break;
@@ -446,6 +450,10 @@ namespace ParryArena.Arena
                 _dodgeTrail.emitting = _state == CombatState.Dodge
                     || _state == CombatState.Foresight       // streak on the backstep
                     || IsForesightCounter;                   // and on the lunge
+
+            // The phantom only lives during the read window.
+            if (_foresightSensor != null && _foresightSensor.activeSelf && _state != CombatState.Foresight)
+                _foresightSensor.SetActive(false);
 
             UpdateBladeColor();
         }
@@ -470,10 +478,29 @@ namespace ParryArena.Arena
                 ApplyPose(_guardPose);
         }
 
-        void BeginSwing()
+        bool HasMoveset => _moveset != null && _moveset.Length > 0;
+
+        AttackDefinition CurrentComboAttack() => _moveset[Mathf.Clamp(_comboStep, 0, _moveset.Length - 1)];
+
+        AttackDefinition FinisherAttack() => _moveset[_moveset.Length - 1];
+
+        /// <summary>True while a started combo can be continued by cancelling the current recovery.</summary>
+        bool CanComboCancel() =>
+            _state == CombatState.Recovery && _comboStep != 0 && Time.unscaledTime <= _comboExpiry;
+
+        /// <summary>Swing the current combo step and advance the string (the finisher loops back to the start).</summary>
+        void BeginComboSwing()
         {
-            _swing = Swings[_swingIndex];
-            _swingIndex = (_swingIndex + 1) % Swings.Length;
+            var attack = CurrentComboAttack();
+            bool isFinisher = _comboStep >= _moveset.Length - 1;
+            _comboStep = isFinisher ? 0 : _comboStep + 1;
+            _comboExpiry = Time.unscaledTime + _comboWindow;
+            BeginSwing(attack);
+        }
+
+        void BeginSwing(AttackDefinition attack)
+        {
+            _currentAttack = attack;
             _chargeFractionForSwing = 0f;
             _timer = 0f;
         }
@@ -492,7 +519,8 @@ namespace ParryArena.Arena
                 float staggerMult = _foresightCounter
                     ? _foresightCounterStaggerMultiplier
                     : Mathf.Lerp(1f, _heavyStaggerMultiplier, _chargeFractionForSwing);
-                _hitbox.SetSwingPower(_attackDamage * damageMult, _attackStagger * staggerMult);
+                _hitbox.SetSwing(_currentAttack.Damage * damageMult, _currentAttack.StaggerDamage * staggerMult,
+                    _currentAttack.Parryable, _currentAttack.Blockable);
                 _hitbox.Activate();
             }
             if (_rig != null && _rig.Trail != null)
@@ -597,7 +625,7 @@ namespace ParryArena.Arena
                         break;
                     case CombatState.Windup:
                         color = TelegraphWindup
-                            ? Color.Lerp(_bladeBaseColor, TelegraphColor, Smooth(_timer, _windup))
+                            ? Color.Lerp(_bladeBaseColor, TelegraphColor, Smooth(_timer, _currentAttack.Windup))
                             : _bladeBaseColor;
                         break;
                     case CombatState.Active:

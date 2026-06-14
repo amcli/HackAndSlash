@@ -15,7 +15,7 @@ namespace ParryArena.Arena
         public CombatTeam Team { get; private set; }
         public float Damage { get; private set; }
         public float StaggerDamage { get; private set; }
-        public bool Parryable { get; private set; }
+        public bool Parryable { get; private set; } = true;
         public bool Blockable { get; private set; } = true;
         public ActorCombat Owner { get; private set; }
 
@@ -33,22 +33,26 @@ namespace ParryArena.Arena
             _debug.SetActiveColor(CombatDebug.HitboxActiveColor);
         }
 
-        public void Configure(CombatTeam team, bool parryable, bool blockable, Vector3 halfExtents, ActorCombat owner)
+        public void Configure(CombatTeam team, Vector3 halfExtents, ActorCombat owner)
         {
             Team = team;
-            Parryable = parryable;
-            Blockable = blockable;
             Owner = owner;
             _halfExtents = halfExtents;
             if (_debug != null)
                 _debug.SetSize(halfExtents * 2f);
         }
 
-        /// <summary>Set by <see cref="ActorCombat"/> at the start of each swing (scaled by charge for the player).</summary>
-        public void SetSwingPower(float damage, float staggerDamage)
+        /// <summary>
+        /// Set by <see cref="ActorCombat"/> when a swing goes active, from the
+        /// current <c>AttackDefinition</c> (damage/stagger already scaled by
+        /// charge or the foresight counter).
+        /// </summary>
+        public void SetSwing(float damage, float staggerDamage, bool parryable, bool blockable)
         {
             Damage = damage;
             StaggerDamage = staggerDamage;
+            Parryable = parryable;
+            Blockable = blockable;
         }
 
         public void Activate()
@@ -76,6 +80,11 @@ namespace ParryArena.Arena
 
             for (int i = 0; i < count; i++)
             {
+                // A parry/foresight absorb this frame ends the swing — stop here so
+                // it can't also clean-hit another (e.g. the now-moved) hurtbox.
+                if (!_active)
+                    break;
+
                 var hurtbox = _overlap[i].GetComponent<Hurtbox>();
                 if (hurtbox == null || hurtbox.Team == Team || _alreadyHit.Contains(hurtbox))
                     continue;
