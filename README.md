@@ -3,7 +3,7 @@
 A parry-forward, Souls-like 1v1 arena duel (Sekiro/Lies of P).
 
 This repository currently contains: the menus, selection
-screens, and a playable greybox arena that the real combat loop plugs into next.
+screens, and a playable placeholder arena that the real combat loop plugs into next.
 
 ---
 
@@ -19,9 +19,9 @@ screens, and a playable greybox arena that the real combat loop plugs into next.
 | In-game pause (reuses the Settings screen) | done |
 | Win / lose result screen (Retry / Quit) | done |
 | **Parry / dodge / stamina / stagger / riposte combat** | in progress |
-| Data-driven enemy AI brain | not started |
+| Enemy AI | not started |
 
-The attack in the arena is intentionally a one-button placeholder so the loop
+The attack in the arena is currently a one-button placeholder so the loop
 *menu → loadout → opponent → fight → win/lose → menu* is playable end to end.
 
 ---
@@ -36,13 +36,7 @@ The attack in the arena is intentionally a one-button placeholder so the loop
 3. Open **`Assets/Scenes/MainMenu.unity`** and press Play.
 
 > Input uses the **legacy Input Manager** (the project's active input handler) and
-> rendering uses the **built-in pipeline** — no extra packages needed for either.
-
-### Optional cleanup (leftover URP-template cruft)
-These are unused now that the project was stripped to bare-bones; safe to delete:
-- `Assets/Scenes/SampleScene.unity` (orphaned URP camera/light/volume)
-- `Assets/InputSystem_Actions.inputactions` (Input System package was removed)
-- `Assets/Settings/` (URP render-pipeline assets; the project now uses built-in)
+> rendering uses the **built-in pipeline**.
 
 ---
 
