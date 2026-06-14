@@ -48,7 +48,7 @@ namespace ParryArena.UI
                 new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(0f, 22f), new Vector2(960f, 28f));
             UIFactory.CreateLabel(hintBox,
-                "WASD move   •   LMB attack (hold = heavy)   •   RMB block / tap-parry   •   Space dodge   •   MMB lock-on   •   Esc pause",
+                "WASD move   •   LMB attack (hold = heavy)   •   RMB block / tap-parry   •   RMB→LMB foresight slash   •   Space dodge   •   MMB lock-on   •   Esc pause",
                 UITheme.SmallSize, TextAlignmentOptions.Center, UITheme.TextMuted);
 
             // Health bars are event-driven; set the initial fill explicitly since

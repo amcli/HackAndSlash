@@ -22,6 +22,7 @@ namespace ParryArena.Arena
         [SerializeField] float _gravity = -22f;
         [SerializeField] float _dodgeSpeed = 9f;
         [SerializeField] float _inputBuffer = 0.14f; // ~8 frames @60: presses near a state boundary still fire
+        [SerializeField] float _commandStepGap = 0.3f; // max gap between the RMB→LMB foresight-slash steps
 
         CharacterController _controller;
         ThirdPersonCamera _cameraRig;
@@ -33,6 +34,8 @@ namespace ParryArena.Arena
         enum BufferedInput { None, Attack, Parry, Dodge }
         BufferedInput _buffered;
         float _bufferTimer;
+
+        readonly InputSequenceDetector _commands = new();
 
         public Health Health { get; private set; }
         public float Stamina => _combat != null ? _combat.Stamina : 0f;
@@ -46,6 +49,11 @@ namespace ParryArena.Arena
             _controller = GetComponent<CharacterController>();
             Health = GetComponent<Health>();
             Health.Init(loadout.MaxHealth);
+
+            // Foresight slash: guard, then attack in quick succession. More
+            // abilities are added simply by registering more sequences here.
+            _commands.Register(Command.ForesightSlash,
+                new[] { InputToken.Guard, InputToken.Attack }, _commandStepGap);
         }
 
         void Update()
@@ -67,16 +75,33 @@ namespace ParryArena.Arena
             if (Input.GetMouseButtonUp(0))
                 _combat.ReleaseCharge();
             if (Input.GetMouseButtonDown(0))
-                Queue(BufferedInput.Attack);       // hold to charge a heavy strike
+                OnAttackPressed();
             if (Input.GetMouseButtonDown(1))
+            {
+                _commands.Feed(InputToken.Guard);  // first half of the foresight command
                 Queue(BufferedInput.Parry);
+            }
             if (Input.GetKeyDown(KeyCode.Space))
+            {
+                _commands.Feed(InputToken.Dodge);
                 Queue(BufferedInput.Dodge);
+            }
 
             TryConsumeBuffer();
         }
 
-        // ---- Input buffering ---------------------------------------------------
+        // ---- Command + buffering -----------------------------------------------
+
+        void OnAttackPressed()
+        {
+            // LMB can complete the RMB→LMB foresight command. If it does (and the
+            // move actually starts), it cancels the just-started parry and we skip
+            // the normal attack; otherwise LMB is an ordinary (charge) attack.
+            bool foresight = _commands.Feed(InputToken.Attack) == Command.ForesightSlash
+                             && _combat.RequestForesightSlash();
+            if (!foresight)
+                Queue(BufferedInput.Attack);       // hold to charge a heavy strike
+        }
 
         void Queue(BufferedInput input)
         {
@@ -122,12 +147,12 @@ namespace ParryArena.Arena
             Vector3 horizontal;
             if (_combat.State == CombatState.Dodge)
                 horizontal = _dodgeDir * (_dodgeSpeed * Mathf.Clamp01(1f - _combat.DodgeNormalizedTime));
-            else if (_combat.IsInHitstun)
-                horizontal = Vector3.zero;        // no voluntary movement during hitstun
+            else if (_combat.IsInHitstun || _combat.State == CombatState.Foresight)
+                horizontal = Vector3.zero;        // committed: no free movement during hitstun or the foresight read
             else
                 horizontal = wish * _moveSpeed;
 
-            horizontal += _combat.KnockbackVelocity;
+            horizontal += _combat.ImpulseVelocity; // knockback + foresight backstep/lunge
 
             if (_controller.isGrounded && _verticalSpeed < 0f)
                 _verticalSpeed = -1f;
