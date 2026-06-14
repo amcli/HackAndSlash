@@ -54,16 +54,41 @@ namespace ParryArena.Data
 
             return new List<EnemyDefinition>
             {
+                // Passive: stands still (MoveSpeed 0), swings on a loop regardless of
+                // range, and never reacts to openings (huge ReactionTime).
                 MakeEnemy("dummy", "Training Dummy",
                     "Throws one slow, telegraphed overhead on a loop. Read the windup and parry it — or just whittle it down.",
-                    health: 500f, contactDps: 0f, contactRadius: 1.8f,
-                    tint: new Color(0.55f, 0.57f, 0.60f), scale: 1f,
+                    health: 500f, tint: new Color(0.55f, 0.57f, 0.60f), scale: 1f,
                     attacks: new[]
                     {
                         // One slow, very readable overhead.
                         MakeAttack("dummy_overhead", new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f),
                             windup: 0.7f, active: 0.22f, recovery: 0.6f, damage: 12f, stagger: 0f, staminaCost: 0f),
-                    }),
+                    },
+                    moveSpeed: 0f, preferredRange: 2f, attackRange: 100f, aggression: 0.35f,
+                    reactionTime: 99f, attackIntervalVariance: 0f,    // metronome for clean practice
+                    defensiveness: 0f, parrySkill: 0f),              // pure target — never guards
+
+                // Aggressive: closes in, strafes, and mixes three attack speeds at
+                // unpredictable intervals; punishes whiffs with its quickest jab.
+                MakeEnemy("brawler", "Brawler",
+                    "Closes the distance and mixes fast jabs, slashes, and heavy overheads at unpredictable timing. Punishes your whiffs — keep your guard honest.",
+                    health: 250f, tint: new Color(0.85f, 0.42f, 0.25f), scale: 1f,
+                    attacks: new[]
+                    {
+                        // Fast jab — low damage, hard to react to (used to punish).
+                        MakeAttack("brawler_jab", new Vector3(-15f, 70f, 0f), new Vector3(-15f, -40f, 0f),
+                            windup: 0.25f, active: 0.10f, recovery: 0.30f, damage: 9f, stagger: 0f, staminaCost: 0f),
+                        // Medium slash.
+                        MakeAttack("brawler_slash", new Vector3(-90f, 55f, 0f), new Vector3(40f, -55f, 0f),
+                            windup: 0.4f, active: 0.15f, recovery: 0.45f, damage: 14f, stagger: 0f, staminaCost: 0f),
+                        // Slow heavy overhead — big telegraph, big damage.
+                        MakeAttack("brawler_heavy", new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f),
+                            windup: 0.65f, active: 0.18f, recovery: 0.55f, damage: 22f, stagger: 0f, staminaCost: 0f),
+                    },
+                    moveSpeed: 3.2f, preferredRange: 1.8f, attackRange: 1.8f, aggression: 0.7f,
+                    reactionTime: 0.15f, attackIntervalVariance: 0.45f,
+                    defensiveness: 0.9f, parrySkill: 0.4f),         // guards telegraphed attacks; sometimes parries back
             };
         }
 
@@ -84,7 +109,9 @@ namespace ParryArena.Data
         }
 
         static EnemyDefinition MakeEnemy(string id, string name, string desc,
-            float health, float contactDps, float contactRadius, Color tint, float scale, AttackDefinition[] attacks)
+            float health, Color tint, float scale, AttackDefinition[] attacks,
+            float moveSpeed, float preferredRange, float attackRange, float aggression,
+            float reactionTime, float attackIntervalVariance, float defensiveness, float parrySkill)
         {
             var e = ScriptableObject.CreateInstance<EnemyDefinition>();
             e.name = name;
@@ -92,11 +119,17 @@ namespace ParryArena.Data
             e.DisplayName = name;
             e.Description = desc;
             e.MaxHealth = health;
-            e.ContactDamagePerSecond = contactDps;
-            e.ContactRadius = contactRadius;
             e.Tint = tint;
             e.BodyScale = scale;
             e.Attacks = attacks;
+            e.MoveSpeed = moveSpeed;
+            e.PreferredRange = preferredRange;
+            e.AttackRange = attackRange;
+            e.Aggression = aggression;
+            e.ReactionTime = reactionTime;
+            e.AttackIntervalVariance = attackIntervalVariance;
+            e.Defensiveness = defensiveness;
+            e.ParrySkill = parrySkill;
             return e;
         }
 

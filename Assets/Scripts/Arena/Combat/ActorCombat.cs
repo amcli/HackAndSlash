@@ -174,15 +174,20 @@ namespace ParryArena.Arena
 
         // ---- Input / requests --------------------------------------------------
 
-        /// <summary>Timed-windup attack used by AI. The player uses charge instead.</summary>
-        public bool RequestAttack()
+        /// <summary>
+        /// Timed-windup attack used by AI: swings a chosen moveset entry directly
+        /// (no player-style combo chaining), so the brain controls which attack —
+        /// and thus the swing speed — each time. The player uses charge instead.
+        /// </summary>
+        public bool RequestAttack(int attackIndex)
         {
             if (!HasMoveset || _state != CombatState.Idle)
                 return false;
-            if (!SpendStamina(CurrentComboAttack().StaminaCost))
+            var attack = _moveset[Mathf.Clamp(attackIndex, 0, _moveset.Length - 1)];
+            if (!SpendStamina(attack.StaminaCost))
                 return false;
 
-            BeginComboSwing();
+            BeginSwing(attack);
             _state = CombatState.Windup;
             return true;
         }
