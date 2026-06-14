@@ -16,6 +16,7 @@ namespace ParryArena.UI
 
         protected override string Describe(EnemyDefinition item) =>
             $"<b>{item.DisplayName}</b>\n{item.Description}\n\n" +
-            $"<color=#9AA2AC>Health</color> {item.MaxHealth:0}";
+            $"<color=#9AA2AC>Health</color> {item.MaxHealth:0}    " +
+            $"<color=#9AA2AC>Style</color> {(item.MoveSpeed > 0f ? "Aggressive" : "Passive")}";
     }
 }

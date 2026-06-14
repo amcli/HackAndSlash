@@ -54,7 +54,7 @@ namespace ParryArena.Arena
 
             // ---- Cross-wire actors + camera ----
             player.Configure(loadout, cameraRig, playerCombat);
-            enemy.Configure(enemyDef, playerParts.Root.transform, enemyCombat);
+            enemy.Configure(enemyDef, playerParts.Root.transform, enemyCombat, playerCombat);
             cameraRig.Configure(playerParts.Root.transform, GameApp.Instance.Settings);
             cameraRig.SetLockTarget(enemyParts.Root.transform);
 

@@ -138,5 +138,10 @@ Scripts/
 1. ~~**M1 — the parry feel loop**~~ *(built)*: perfect parry / block / dodge +
    i-frames / stamina / hitstop / stagger meter → riposte / charged heavy strike,
    plus the feel layer — procedural SFX, spark + hit VFX, and input buffering.
-2. **M2** — move attacks into `AttackSO` frame data + animation events.
-3. **M3** — the one-brain, data-driven enemy AI reading `EnemyDefinition`.
+2. ~~**M2**~~ *(built)* — attacks live in `AttackDefinition` frame data + per-actor
+   movesets, with a light combo string and the RMB→LMB foresight-slash command.
+3. ~~**M3**~~ *(built)* — one, data-driven enemy brain (`EnemyController`) reading
+   each `EnemyDefinition`'s Behaviour values: spacing/locomotion, varied moveset
+   attacks at jittered intervals, whiff-punishing, and reactive block/dodge/parry
+   of the player's attacks. A passive **Training Dummy** and an aggressive,
+   parry-happy **Brawler** are the same code, tuned apart.
