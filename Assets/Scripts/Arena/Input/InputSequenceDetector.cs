@@ -3,12 +3,6 @@ using UnityEngine;
 
 namespace ParryArena.Arena
 {
-    /// <summary>The vocabulary of inputs that can take part in a command sequence.</summary>
-    public enum InputToken { Attack, Guard, Dodge }
-
-    /// <summary>The special moves a recognised sequence can trigger.</summary>
-    public enum Command { None, ForesightSlash }
-
     /// <summary>
     /// A fighting-game style "motion input" recogniser. Register command
     /// sequences (ordered <see cref="InputToken"/>s plus the max time allowed

@@ -209,9 +209,7 @@ namespace ParryArena.Arena
             else
                 return;
 
-            if (face.sqrMagnitude > 0.0001f)
-                transform.rotation = Quaternion.Slerp(transform.rotation,
-                    Quaternion.LookRotation(face, Vector3.up), _rotationLerp * Time.deltaTime);
+            transform.FaceDirection(face, _rotationLerp);
         }
 
         Vector3 FlatToTarget()

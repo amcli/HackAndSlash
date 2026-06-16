@@ -10,6 +10,9 @@ namespace ParryArena.Arena
     /// </summary>
     public static class ArenaStage
     {
+        /// <summary>Half the side length of the square arena — the wall ring sits at ±this on X and Z.</summary>
+        public const float HalfExtent = 20f;
+
         /// <summary>Builds the environment and returns the camera rig (still unconfigured).</summary>
         public static ThirdPersonCamera Build()
         {
@@ -32,7 +35,7 @@ namespace ParryArena.Arena
             ground.transform.localScale = new Vector3(4f, 1f, 4f); // plane is 10x10 -> 40x40
             Tint(ground, new Color(0.18f, 0.19f, 0.21f));
 
-            const float half = 20f;
+            const float half = HalfExtent;
             CreateWall(new Vector3(0f, 1.5f, half), new Vector3(42f, 3f, 1f));
             CreateWall(new Vector3(0f, 1.5f, -half), new Vector3(42f, 3f, 1f));
             CreateWall(new Vector3(half, 1.5f, 0f), new Vector3(1f, 3f, 42f));

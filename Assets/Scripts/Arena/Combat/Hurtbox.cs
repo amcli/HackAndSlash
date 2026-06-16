@@ -9,10 +9,10 @@ namespace ParryArena.Arena
     /// belongs to, its <see cref="Health"/>, and its <see cref="ActorCombat"/>
     /// (to check for an active parry).
     ///
-    /// A <see cref="IsForesightSensor"/> hurtbox is a special, detached phantom
-    /// parked at the spot a foresight slash was triggered: it ONLY ever absorbs
-    /// a hit during the counter window and never takes normal damage, so the read
-    /// is judged against the original position while the body dashes clear.
+    /// An <see cref="AbsorbOnly"/> hurtbox is a special, detached phantom that ONLY
+    /// ever absorbs a hit during a counter window and never takes normal damage
+    /// (the foresight read uses one, parked at the trigger spot so the read is
+    /// judged against the original position while the body dashes clear).
     /// </summary>
     [RequireComponent(typeof(BoxCollider))]
     public class Hurtbox : MonoBehaviour
@@ -20,15 +20,15 @@ namespace ParryArena.Arena
         public CombatTeam Team { get; private set; }
         public Health Health { get; private set; }
         public ActorCombat Combat { get; private set; }
-        public bool IsForesightSensor { get; private set; }
+        public bool AbsorbOnly { get; private set; }
 
         public void Configure(CombatTeam team, Health health, ActorCombat combat, Vector3 size,
-            bool foresightSensor = false)
+            bool absorbOnly = false)
         {
             Team = team;
             Health = health;
             Combat = combat;
-            IsForesightSensor = foresightSensor;
+            AbsorbOnly = absorbOnly;
 
             var box = GetComponent<BoxCollider>();
             box.isTrigger = true;

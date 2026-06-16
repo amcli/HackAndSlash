@@ -70,7 +70,6 @@ namespace ParryArena.Arena
 
             var rig = root.gameObject.AddComponent<WeaponRig>();
             rig.Pivot = pivot;
-            rig.Blade = blade.transform;
             rig.BladeRenderer = blade.GetComponent<Renderer>();
             rig.HitboxAnchor = hitboxAnchor;
             rig.Trail = trail;

@@ -31,11 +31,8 @@ namespace ParryArena.Arena
 
         static void EnsureInstance()
         {
-            if (_instance != null)
-                return;
-            var go = new GameObject("[CombatAudio]");
-            DontDestroyOnLoad(go);
-            _instance = go.AddComponent<CombatAudio>();
+            if (_instance == null)
+                _instance = Persistent.Create<CombatAudio>("[CombatAudio]");
         }
 
         void Awake()

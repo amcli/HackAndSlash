@@ -63,7 +63,8 @@ Namespaces are area-level (`ParryArena.Core/.Data/.UI/.Arena`).
 Scripts/
   Bootstrap/          AppBootstrap (auto entry point) + SceneComposer (composition root)
   Core/               Cross-scene services: GameApp, GameSession, MatchResult,
-                      GameSettings, SceneFlow, SceneId, UICursor, AppQuit
+                      GameSettings, SceneFlow, SceneId, UICursor, AppQuit,
+                      Persistent (DontDestroyOnLoad singleton helper)
   Data/               ScriptableObjects: LoadoutDefinition, EnemyDefinition,
                       + GameContent (authored-asset-or-built-in-default provider)
   UI/                 UIFactory + UITheme (DRY widget builders), UIScreen, StatBar

@@ -36,14 +36,5 @@ namespace ParryArena.Arena
             if (IsDead)
                 Died?.Invoke(this);
         }
-
-        public void Heal(float amount)
-        {
-            if (IsDead || amount <= 0f)
-                return;
-
-            Current = Mathf.Min(Max, Current + amount);
-            Changed?.Invoke(this);
-        }
     }
 }

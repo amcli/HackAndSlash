@@ -20,9 +20,7 @@ namespace ParryArena.Core
             if (Instance != null)
                 return Instance;
 
-            var go = new GameObject("[GameApp]");
-            DontDestroyOnLoad(go);
-            return go.AddComponent<GameApp>(); // Awake wires everything up
+            return Persistent.Create<GameApp>("[GameApp]"); // Awake wires everything up
         }
 
         void Awake()

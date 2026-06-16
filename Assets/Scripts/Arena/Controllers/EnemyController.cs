@@ -26,7 +26,7 @@ namespace ParryArena.Arena
         [Tooltip("Seeded from the EnemyDefinition on spawn; drag it in Play mode to tune the fight live.")]
         [SerializeField] float _maxHealth = 150f;
 
-        const float ArenaHalfExtent = 18f;     // keep clear of the walls
+        const float WallClearance = 2f;        // how far inside the arena walls the body stays
         const float MinAttackInterval = 0.5f;  // at Aggression 1
         const float MaxAttackInterval = 2.0f;  // at Aggression 0
         const float StrafeFlipInterval = 2.5f;
@@ -81,7 +81,7 @@ namespace ParryArena.Arena
             float distance = toTarget.magnitude;
             Vector3 forward = distance > 0.001f ? toTarget / distance : transform.forward;
 
-            FaceTarget(forward, dt);
+            FaceTarget(forward);
 
             _openingTimer = PlayerIsOpen() ? _openingTimer + dt : 0f;
             UpdateThreat(distance, dt);
@@ -259,20 +259,18 @@ namespace ParryArena.Arena
             return baseInterval * Random.Range(1f - variance, 1f + variance);
         }
 
-        void FaceTarget(Vector3 forward, float dt)
+        void FaceTarget(Vector3 forward)
         {
             if (_combat != null && (_combat.IsInHitstun || _combat.IsStaggered))
                 return;                                            // don't track while reeling
-            if (forward.sqrMagnitude < 0.0001f)
-                return;
-            var look = Quaternion.LookRotation(forward, Vector3.up);
-            transform.rotation = Quaternion.Slerp(transform.rotation, look, _turnSpeed * dt);
+            transform.FaceDirection(forward, _turnSpeed);
         }
 
         static Vector3 ClampToArena(Vector3 p)
         {
-            p.x = Mathf.Clamp(p.x, -ArenaHalfExtent, ArenaHalfExtent);
-            p.z = Mathf.Clamp(p.z, -ArenaHalfExtent, ArenaHalfExtent);
+            float limit = ArenaStage.HalfExtent - WallClearance;
+            p.x = Mathf.Clamp(p.x, -limit, limit);
+            p.z = Mathf.Clamp(p.z, -limit, limit);
             return p;
         }
     }

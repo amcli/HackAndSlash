@@ -38,6 +38,10 @@ namespace ParryArena.Arena
         [SerializeField] float _knockbackSpeed = 4f;
         [SerializeField] float _knockbackDecay = 12f;
 
+        [Header("Lunge")]
+        [Tooltip("A swing's step-in won't carry the body closer to its target than this, so chaining attacks doesn't slide it through or past the opponent. Roughly striking distance.")]
+        [SerializeField] float _lungeStopDistance = 1.7f;
+
         [Header("Stamina")]
         [SerializeField] float _staminaRegenPerSecond = 22f;
         [SerializeField] float _dodgeStaminaCost = 28f;
@@ -60,6 +64,8 @@ namespace ParryArena.Arena
         [SerializeField] float _foresightBackstepSpeed = 7f;     // snappy hop back so the read reads clearly
         [SerializeField] float _foresightLungeSpeed = 11f;       // lunge forward into the counter to re-close
         [SerializeField] float _foresightSensorHeight = 1f;      // body-centre offset for the phantom (matches the hurtbox)
+        [Tooltip("Read-sensor box, deliberately bigger than the body so a lunging blade reliably passes through it; it only absorbs during the counter window, so a generous box can't cause stray hits.")]
+        [SerializeField] Vector3 _foresightSensorSize = new Vector3(1.8f, 2.4f, 1.8f);
 
         [Header("Staggered (when this actor is broken)")]
         [SerializeField] float _staggerDuration = 2.5f;
@@ -94,6 +100,8 @@ namespace ParryArena.Arena
 
         bool _guardHeld;
         Vector3 _impulseVelocity; // decaying scripted body motion: knockback, foresight backstep/lunge
+        bool _lunging;            // a forward step-in is in flight (clamped at striking distance)
+        Transform _lungeTarget;   // opponent, so the lunge knows when to stop
         float _dodgeCooldownRemaining;
         float _foresightCooldownRemaining;
         bool _foresightCounter; // the next EnterActive is an empowered foresight counter
@@ -169,8 +177,8 @@ namespace ParryArena.Arena
         public void SetDodgeTrail(TrailRenderer trail) => _dodgeTrail = trail;
         public void SetStaggerMeter(StaggerMeter meter) => _stagger = meter;
 
-        /// <summary>The detached phantom hurtbox this actor parks at its trigger spot during a foresight read.</summary>
-        public void SetForesightSensor(GameObject sensor) => _foresightSensor = sensor;
+        /// <summary>The opponent this actor lunges toward — so a swing's step-in stops at striking distance instead of sliding through.</summary>
+        public void SetTarget(Transform target) => _lungeTarget = target;
 
         // ---- Input / requests --------------------------------------------------
 
@@ -267,6 +275,7 @@ namespace ParryArena.Arena
 
             // Drop the phantom at our current (original) spot, then dash clear — the
             // read is judged against the phantom, not the body we're moving away.
+            EnsureForesightSensor();
             if (_foresightSensor != null)
             {
                 _foresightSensor.transform.SetPositionAndRotation(
@@ -297,7 +306,7 @@ namespace ParryArena.Arena
                 return;
             _flashTimer = 0.16f;
             _foresightCounter = true;
-            ApplyImpulse(transform.forward, _foresightLungeSpeed); // lunge in so the counter re-closes the gap
+            LungeForward(_foresightLungeSpeed); // lunge in so the counter re-closes the gap (capped at striking distance)
             BeginSwing(FinisherAttack());   // the counter always swings the dramatic finisher
             EnterActive();
         }
@@ -318,8 +327,6 @@ namespace ParryArena.Arena
         {
             if (Health != null)
                 Health.TakeDamage(damage * _blockChipFraction);
-
-            ScreenShake.Shake(0.2f);
 
             if (!_usesStamina)
                 return;
@@ -366,6 +373,14 @@ namespace ParryArena.Arena
                 _flashTimer -= Time.unscaledDeltaTime;
 
             _impulseVelocity = Vector3.MoveTowards(_impulseVelocity, Vector3.zero, _knockbackDecay * dt);
+
+            // A forward step-in halts as soon as it reaches striking distance (or
+            // peters out), so chaining swings can't walk the body through the target.
+            if (_lunging && (_impulseVelocity.sqrMagnitude < 0.0001f || FlatDistanceToTarget() <= _lungeStopDistance))
+            {
+                _impulseVelocity = Vector3.zero;
+                _lunging = false;
+            }
 
             if (_dodgeCooldownRemaining > 0f)
                 _dodgeCooldownRemaining -= dt;
@@ -514,6 +529,14 @@ namespace ParryArena.Arena
         {
             _state = CombatState.Active;
             _timer = 0f;
+
+            // Step into the swing so it closes the gap rather than needing the
+            // target already inside the blade's arc — but only across the gap that's
+            // left (see LungeForward). The foresight counter already applied its own
+            // (stronger) lunge, so don't overwrite it.
+            if (!_foresightCounter)
+                LungeForward(_currentAttack.LungeSpeed);
+
             if (_hitbox != null)
             {
                 // Foresight counter overrides the charge scaling with its own
@@ -563,6 +586,7 @@ namespace ParryArena.Arena
             ApplyPose(_restPose);
             _state = CombatState.Hitstun;
             _timer = 0f;
+            _lunging = false;            // knockback owns the impulse now, not a lunge
             ApplyImpulse(direction, _knockbackSpeed);
         }
 
@@ -574,12 +598,43 @@ namespace ParryArena.Arena
                 _impulseVelocity = worldDirection.normalized * speed;
         }
 
+        /// <summary>
+        /// Step into a swing, but only across the gap that's actually left: skip it
+        /// when already within striking distance, and cap the speed so the decaying
+        /// glide settles around <see cref="_lungeStopDistance"/> instead of sliding
+        /// through or past the target. The per-frame clamp in Update then halts it
+        /// the instant it arrives (covering a target that closes in to meet it).
+        /// </summary>
+        void LungeForward(float speed)
+        {
+            if (speed <= 0f)
+                return;
+            float gap = FlatDistanceToTarget() - _lungeStopDistance;
+            if (gap <= 0f)
+                return;                                  // already in range — stay put
+            // A decaying impulse travels v^2 / (2*decay); invert to cap it at the gap.
+            float maxSpeed = Mathf.Sqrt(2f * _knockbackDecay * gap);
+            ApplyImpulse(transform.forward, Mathf.Min(speed, maxSpeed));
+            _lunging = true;
+        }
+
+        /// <summary>Flat (XZ) distance to the lunge target, or +infinity if none is set.</summary>
+        float FlatDistanceToTarget()
+        {
+            if (_lungeTarget == null)
+                return Mathf.Infinity;
+            Vector3 d = _lungeTarget.position - transform.position;
+            d.y = 0f;
+            return d.magnitude;
+        }
+
         void EnterIdle()
         {
             _state = CombatState.Idle;
             _timer = 0f;
             _chargeFractionForSwing = 0f;
             _foresightCounter = false;
+            _lunging = false;
             ApplyPose(_restPose);
         }
 
@@ -589,6 +644,24 @@ namespace ParryArena.Arena
                 _hitbox.Deactivate();
             if (_rig != null && _rig.Trail != null)
                 _rig.Trail.emitting = false;
+        }
+
+        /// <summary>
+        /// Lazily creates this ability's detached phantom hurtbox the first time a
+        /// foresight read is triggered, so the ability owns its own tooling and only
+        /// an actor that actually uses it ever spawns one. Flagged so it only ever
+        /// absorbs (during the counter window) and starts disabled; the read
+        /// positions and enables it.
+        /// </summary>
+        void EnsureForesightSensor()
+        {
+            if (_foresightSensor != null || _hitbox == null)
+                return;
+            var go = new GameObject("ForesightSensor");
+            var hurtbox = go.AddComponent<Hurtbox>();
+            hurtbox.Configure(_hitbox.Team, Health, this, _foresightSensorSize, absorbOnly: true);
+            go.SetActive(false);
+            _foresightSensor = go;
         }
 
         bool SpendStamina(float cost)

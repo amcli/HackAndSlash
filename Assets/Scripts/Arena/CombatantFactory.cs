@@ -18,7 +18,7 @@ namespace ParryArena.Arena
             var enemyDef = session.SelectedEnemy;
 
             // ---- Enemy ----
-            var enemyParts = ActorVisualFactory.CreateAvatar(enemyDef.DisplayName, enemyDef.Tint, enemyDef.BodyScale, 1.3f);
+            var enemyParts = ActorVisualFactory.CreateAvatar(enemyDef.DisplayName, enemyDef.Tint, enemyDef.BodyScale, 1.7f);
             enemyParts.Root.transform.position = new Vector3(0f, 0f, 4f);
             var enemyHealth = enemyParts.Root.AddComponent<Health>();
             var enemyStagger = enemyParts.Root.AddComponent<StaggerMeter>();
@@ -50,11 +50,12 @@ namespace ParryArena.Arena
             playerCombat.ConfigureStamina(usesStamina: true, loadout.MaxStamina);
             playerCombat.SetMoveset(loadout.Combo);
             playerCombat.SetDodgeTrail(playerParts.DodgeTrail);
-            playerCombat.SetForesightSensor(CreateForesightSensor(playerHealth, playerCombat));
 
             // ---- Cross-wire actors + camera ----
             player.Configure(loadout, cameraRig, playerCombat);
             enemy.Configure(enemyDef, playerParts.Root.transform, enemyCombat, playerCombat);
+            playerCombat.SetTarget(enemyParts.Root.transform);   // lunge toward the opponent…
+            enemyCombat.SetTarget(playerParts.Root.transform);   // …and stop at striking distance
             cameraRig.Configure(playerParts.Root.transform, GameApp.Instance.Settings);
             cameraRig.SetLockTarget(enemyParts.Root.transform);
 
@@ -70,25 +71,12 @@ namespace ParryArena.Arena
             return hurtbox;
         }
 
-        /// <summary>
-        /// A detached phantom hurtbox the player parks at its foresight-trigger spot.
-        /// Same size as the body, flagged so it only ever absorbs (never takes a
-        /// normal hit), and starts disabled — <see cref="ActorCombat"/> positions
-        /// and enables it for the duration of the read.
-        /// </summary>
-        static GameObject CreateForesightSensor(Health health, ActorCombat combat)
-        {
-            var go = new GameObject("ForesightSensor");
-            var hurtbox = go.AddComponent<Hurtbox>();
-            hurtbox.Configure(CombatTeam.Player, health, combat, HurtboxSize, foresightSensor: true);
-            go.SetActive(false);
-            return go;
-        }
-
         static Hitbox SetupHitbox(WeaponRig rig, CombatTeam team, ActorCombat owner)
         {
             var hitbox = rig.HitboxAnchor.gameObject.AddComponent<Hitbox>();
-            hitbox.Configure(team, new Vector3(0.14f, 0.14f, rig.BladeLength * 0.5f), owner);
+            // A touch larger than the blade in every dimension so swings connect
+            // more forgivingly (the z half-extent grows with the longer blade too).
+            hitbox.Configure(team, new Vector3(0.2f, 0.2f, rig.BladeLength * 0.55f), owner);
             return hitbox;
         }
     }

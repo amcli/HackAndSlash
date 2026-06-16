@@ -1,4 +1,5 @@
 using System.Collections;
+using ParryArena.Core;
 using UnityEngine;
 
 namespace ParryArena.Arena
@@ -28,11 +29,8 @@ namespace ParryArena.Arena
 
         static void EnsureInstance()
         {
-            if (_instance != null)
-                return;
-            var go = new GameObject("[Hitstop]");
-            DontDestroyOnLoad(go);
-            _instance = go.AddComponent<Hitstop>();
+            if (_instance == null)
+                _instance = Persistent.Create<Hitstop>("[Hitstop]");
         }
 
         void Begin(float seconds)

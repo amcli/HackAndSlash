@@ -32,16 +32,22 @@ namespace ParryArena.Data
                 MakeLoadout("katana", "Katana",
                     "Fast and fragile. Lower health but big damage and a deep stamina pool that rewards aggression.",
                     health: 90f, stamina: 130f,
-                    tint: new Color(0.85f, 0.32f, 0.42f), weaponLength: 1.5f,
+                    tint: new Color(0.85f, 0.32f, 0.42f), weaponLength: 1.9f,
                     combo: new[]
                     {
-                        // A 3-hit string: two quick slashes into a heavy overhead finisher.
+                        // A 3-hit string: two slashes into a heavy overhead finisher.
+                        // Each swing steps in (lunge) so it closes the gap; the
+                        // finisher commits hardest. Active/recovery are deliberately
+                        // weighty so the string reads instead of mashing out.
                         MakeAttack("katana_1", new Vector3(-90f, 55f, 0f), new Vector3(40f, -55f, 0f),
-                            windup: 0.13f, active: 0.10f, recovery: 0.20f, damage: 22f, stagger: 8f, staminaCost: 12f),
+                            windup: 0.13f, active: 0.16f, recovery: 0.24f, damage: 22f, stagger: 8f, staminaCost: 12f,
+                            lungeSpeed: 4f),
                         MakeAttack("katana_2", new Vector3(-10f, 80f, 0f), new Vector3(-10f, -80f, 0f),
-                            windup: 0.11f, active: 0.10f, recovery: 0.18f, damage: 24f, stagger: 9f, staminaCost: 12f),
+                            windup: 0.13f, active: 0.16f, recovery: 0.22f, damage: 24f, stagger: 9f, staminaCost: 12f,
+                            lungeSpeed: 4f),
                         MakeAttack("katana_finisher", new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f),
-                            windup: 0.18f, active: 0.12f, recovery: 0.34f, damage: 40f, stagger: 20f, staminaCost: 18f),
+                            windup: 0.20f, active: 0.18f, recovery: 0.40f, damage: 40f, stagger: 20f, staminaCost: 18f,
+                            lungeSpeed: 6f),
                     }),
             };
         }
@@ -61,9 +67,11 @@ namespace ParryArena.Data
                     health: 500f, tint: new Color(0.55f, 0.57f, 0.60f), scale: 1f,
                     attacks: new[]
                     {
-                        // One slow, very readable overhead.
+                        // One slow, very readable overhead. Stays planted (no lunge)
+                        // so the training target doesn't drift toward the player.
                         MakeAttack("dummy_overhead", new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f),
-                            windup: 0.7f, active: 0.22f, recovery: 0.6f, damage: 12f, stagger: 0f, staminaCost: 0f),
+                            windup: 0.7f, active: 0.22f, recovery: 0.6f, damage: 12f, stagger: 0f, staminaCost: 0f,
+                            lungeSpeed: 0f),
                     },
                     moveSpeed: 0f, preferredRange: 2f, attackRange: 100f, aggression: 0.35f,
                     reactionTime: 99f, attackIntervalVariance: 0f,    // metronome for clean practice
@@ -78,13 +86,16 @@ namespace ParryArena.Data
                     {
                         // Fast jab — low damage, hard to react to (used to punish).
                         MakeAttack("brawler_jab", new Vector3(-15f, 70f, 0f), new Vector3(-15f, -40f, 0f),
-                            windup: 0.25f, active: 0.10f, recovery: 0.30f, damage: 9f, stagger: 0f, staminaCost: 0f),
-                        // Medium slash.
+                            windup: 0.25f, active: 0.10f, recovery: 0.30f, damage: 9f, stagger: 0f, staminaCost: 0f,
+                            lungeSpeed: 3f),
+                        // Medium slash — steps in.
                         MakeAttack("brawler_slash", new Vector3(-90f, 55f, 0f), new Vector3(40f, -55f, 0f),
-                            windup: 0.4f, active: 0.15f, recovery: 0.45f, damage: 14f, stagger: 0f, staminaCost: 0f),
-                        // Slow heavy overhead — big telegraph, big damage.
+                            windup: 0.4f, active: 0.15f, recovery: 0.45f, damage: 14f, stagger: 0f, staminaCost: 0f,
+                            lungeSpeed: 4.5f),
+                        // Slow heavy overhead — big telegraph, big damage, big commit forward.
                         MakeAttack("brawler_heavy", new Vector3(-135f, 0f, 0f), new Vector3(55f, 0f, 0f),
-                            windup: 0.65f, active: 0.18f, recovery: 0.55f, damage: 22f, stagger: 0f, staminaCost: 0f),
+                            windup: 0.65f, active: 0.18f, recovery: 0.55f, damage: 22f, stagger: 0f, staminaCost: 0f,
+                            lungeSpeed: 5.5f),
                     },
                     moveSpeed: 3.2f, preferredRange: 1.8f, attackRange: 1.8f, aggression: 0.7f,
                     reactionTime: 0.15f, attackIntervalVariance: 0.45f,
@@ -135,7 +146,7 @@ namespace ParryArena.Data
 
         static AttackDefinition MakeAttack(string id, Vector3 windupPose, Vector3 activeEndPose,
             float windup, float active, float recovery, float damage, float stagger, float staminaCost,
-            bool parryable = true, bool blockable = true)
+            float lungeSpeed = 4f, bool parryable = true, bool blockable = true)
         {
             var a = ScriptableObject.CreateInstance<AttackDefinition>();
             a.name = id;
@@ -147,6 +158,7 @@ namespace ParryArena.Data
             a.ActiveEndPose = activeEndPose;
             a.Damage = damage;
             a.StaggerDamage = stagger;
+            a.LungeSpeed = lungeSpeed;
             a.Parryable = parryable;
             a.Blockable = blockable;
             a.StaminaCost = staminaCost;

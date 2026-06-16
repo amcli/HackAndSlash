@@ -28,6 +28,10 @@ namespace ParryArena.Data
         public Vector3 WindupPose = new Vector3(-135f, 0f, 0f);
         public Vector3 ActiveEndPose = new Vector3(55f, 0f, 0f);
 
+        [Header("Movement")]
+        [Tooltip("Forward step-in driven on the active frame, so the swing closes the gap instead of needing the target already inside the blade's arc. 0 = planted (e.g. a training dummy).")]
+        public float LungeSpeed = 4f;
+
         [Header("Power")]
         public float Damage = 20f;
         public float StaggerDamage = 8f;

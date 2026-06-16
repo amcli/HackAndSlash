@@ -37,9 +37,10 @@ namespace ParryArena.Arena
             // Contact point: the blade hitbox sits where the swing connects.
             Vector3 contact = attacker.transform.position;
 
-            // The foresight sensor is a phantom parked at the trigger spot: it ONLY
-            // ever absorbs (during the window), never takes a normal hit.
-            if (target.IsForesightSensor)
+            // An absorb-only hurtbox (the foresight read sensor) is a phantom parked
+            // at the trigger spot: it ONLY ever absorbs (during the window), never
+            // takes a normal hit.
+            if (target.AbsorbOnly)
             {
                 TryForesightAbsorb(attacker, defender, contact);
                 return;
@@ -78,6 +79,7 @@ namespace ParryArena.Arena
             if (defender != null && defender.IsBlocking && attacker.Blockable)
             {
                 defender.OnBlocked(attacker.Damage);
+                ScreenShake.Shake(0.2f);
                 CombatAudio.Play(CombatSound.Block);
                 ImpactVfx.Play(contact, BlockSpark, scale: 0.8f, count: 10);
                 return;

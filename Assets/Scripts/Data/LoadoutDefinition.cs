@@ -28,6 +28,6 @@ namespace ParryArena.Data
         [Header("Greybox visuals")]
         public Color Tint = new Color(0.30f, 0.55f, 0.85f, 1f);
         [Tooltip("Length of the weapon primitive, in metres.")]
-        public float WeaponLength = 1.2f;
+        public float WeaponLength = 0.1f;
     }
 }

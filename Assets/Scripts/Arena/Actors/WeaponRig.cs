@@ -10,7 +10,6 @@ namespace ParryArena.Arena
     public class WeaponRig : MonoBehaviour
     {
         public Transform Pivot;          // rotated to swing the blade
-        public Transform Blade;          // the visible "sword"
         public Renderer BladeRenderer;   // tinted for parry/telegraph flashes
         public Transform HitboxAnchor;   // where the Hitbox component lives (blade centre)
         public TrailRenderer Trail;      // emits during the active swing
