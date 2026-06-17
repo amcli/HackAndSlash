@@ -32,7 +32,7 @@ namespace ParryArena.Data
                 MakeLoadout("katana", "Katana",
                     "Fast and fragile. Lower health but big damage and a deep stamina pool that rewards aggression.",
                     health: 90f, stamina: 130f,
-                    tint: new Color(0.85f, 0.32f, 0.42f), weaponLength: 1.9f,
+                    tint: new Color(0.85f, 0.32f, 0.42f), weaponLength: 1.4f,
                     combo: new[]
                     {
                         // A 3-hit string: two slashes into a heavy overhead finisher.

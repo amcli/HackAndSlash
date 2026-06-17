@@ -70,10 +70,7 @@ namespace ParryArena.Arena
             else
                 _buffered = BufferedInput.None;
 
-            // Releasing LMB always fires immediately (it only matters mid-charge);
-            // the press-actions are buffered so they survive a state boundary.
-            if (Input.GetMouseButtonUp(0))
-                _combat.ReleaseCharge();
+            // Press-actions are buffered so they survive a state boundary.
             if (Input.GetMouseButtonDown(0))
                 OnAttackPressed();
             if (Input.GetMouseButtonDown(1))
@@ -96,11 +93,11 @@ namespace ParryArena.Arena
         {
             // LMB can complete the RMB→LMB foresight command. If it does (and the
             // move actually starts), it cancels the just-started parry and we skip
-            // the normal attack; otherwise LMB is an ordinary (charge) attack.
+            // the normal attack; otherwise LMB is the next combo hit.
             bool foresight = _commands.Feed(InputToken.Attack) == Command.ForesightSlash
                              && _combat.RequestForesightSlash();
             if (!foresight)
-                Queue(BufferedInput.Attack);       // hold to charge a heavy strike
+                Queue(BufferedInput.Attack);       // buffer the next combo hit
         }
 
         void Queue(BufferedInput input)
@@ -116,13 +113,7 @@ namespace ParryArena.Arena
             switch (_buffered)
             {
                 case BufferedInput.Attack:
-                    if (Input.GetMouseButton(0))
-                        consumed = _combat.RequestChargeStart();      // still held → charge
-                    else if (_combat.RequestChargeStart())
-                    {
-                        _combat.ReleaseCharge();                      // already released → light tap
-                        consumed = true;
-                    }
+                    consumed = _combat.RequestComboHit();
                     break;
                 case BufferedInput.Parry:
                     consumed = _combat.RequestParry();

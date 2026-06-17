@@ -9,10 +9,11 @@ namespace ParryArena.Arena
     /// (parry window → held block), the dodge with i-frames, hitstun/knockback,
     /// stamina, the charged heavy strike, and the staggered state.
     ///
-    /// The player attacks by charging (hold LMB → <see cref="RequestChargeStart"/>,
-    /// release → <see cref="ReleaseCharge"/>); enemies use a timed windup
-    /// (<see cref="RequestAttack"/>). Damage/stagger for each swing are pushed to
-    /// the <see cref="Hitbox"/> at the active frame, scaled by charge.
+    /// The player attacks with a fixed-timing combo (LMB per hit, see
+    /// <see cref="RequestComboHit"/>); enemies use a timed windup
+    /// (<see cref="RequestAttack"/>). A held charge (<see cref="RequestChargeStart"/> /
+    /// <see cref="ReleaseCharge"/>) remains available for an optional heavy strike.
+    /// Damage/stagger for each swing are pushed to the <see cref="Hitbox"/> at the active frame.
     ///
     /// Resolution priority lives in <see cref="CombatResolver"/>:
     /// parry > dodge i-frames > block > riposte (vs staggered) > clean hit.
@@ -40,7 +41,7 @@ namespace ParryArena.Arena
 
         [Header("Lunge")]
         [Tooltip("A swing's step-in won't carry the body closer to its target than this, so chaining attacks doesn't slide it through or past the opponent. Roughly striking distance.")]
-        [SerializeField] float _lungeStopDistance = 1.7f;
+        [SerializeField] float _lungeStopDistance = 1.6f;
 
         [Header("Stamina")]
         [SerializeField] float _staminaRegenPerSecond = 22f;
@@ -70,9 +71,17 @@ namespace ParryArena.Arena
         [Header("Staggered (when this actor is broken)")]
         [SerializeField] float _staggerDuration = 2.5f;
 
+        [Header("Arm articulation (procedural elbow + wrist)")]
+        [Tooltip("Elbow flex (degrees) at full windup; the arm coils back, then snaps straight on the active strike.")]
+        [SerializeField] float _cockedElbowBend = 95f;
+        [Tooltip("Wrist lay-back (degrees) at full windup; the blade trails, then whips through on the strike.")]
+        [SerializeField] float _cockedWristBend = 40f;
+        [Tooltip("How quickly the elbow/wrist track their target (higher = snappier).")]
+        [SerializeField] float _armBendLerp = 18f;
+
         [Header("Blade poses (pivot Euler degrees; blade points +Z at rest)")]
-        [SerializeField] Vector3 _restPose = new Vector3(-20f, -10f, 0f);
-        [SerializeField] Vector3 _guardPose = new Vector3(-30f, -70f, 35f);  // cross-body parry/block guard
+        [SerializeField] Vector3 _restPose = new Vector3(38f, -8f, 0f);       // arm low and forward (the elbow bend lifts the blade back toward level)
+        [SerializeField] Vector3 _guardPose = new Vector3(-8f, 28f, 10f);     // blade held in front, angled diagonally up to the side
         [SerializeField] Vector3 _staggeredPose = new Vector3(85f, 10f, 0f); // slumped, blade down
 
         /// <summary>Enemy attacks colour the blade during windup so the swing is readable.</summary>
@@ -92,7 +101,10 @@ namespace ParryArena.Arena
         AttackDefinition[] _moveset;
         AttackDefinition _currentAttack;
         int _comboStep;        // index of the next attack in the combo string
+        int _swingingComboIndex = -1; // which moveset entry the current swing is (for syncing the attack clip)
         float _comboExpiry;    // unscaled time after which the string lapses back to the start
+        float _swWindup, _swActive, _swRecovery; // current swing's phase durations (combo hits override these from the clip)
+        float[] _comboWindup, _comboActive, _comboRecovery; // per-hit timings derived from the combo clip's breakpoints
         Vector3 _currentPose;
         Vector3 _recoveryStartPose;
         float _flashTimer;
@@ -102,6 +114,8 @@ namespace ParryArena.Arena
         Vector3 _impulseVelocity; // decaying scripted body motion: knockback, foresight backstep/lunge
         bool _lunging;            // a forward step-in is in flight (clamped at striking distance)
         Transform _lungeTarget;   // opponent, so the lunge knows when to stop
+        const float IdleArmExtension = 0.72f; // resting flex (0 = coiled, 1 = straight); stances stay mostly extended so the pose aims the blade, while swings still coil to 0
+        float _armExtension = IdleArmExtension;
         float _dodgeCooldownRemaining;
         float _foresightCooldownRemaining;
         bool _foresightCounter; // the next EnterActive is an empowered foresight counter
@@ -144,6 +158,29 @@ namespace ParryArena.Arena
         /// <summary>True while an empowered foresight counter swing is connecting — used to give its hit a special look.</summary>
         public bool IsForesightCounter => _foresightCounter && _state == CombatState.Active;
 
+        /// <summary>True while a swing plays out (windup/active/recovery) — drives the attack animation.</summary>
+        public bool IsSwinging =>
+            _state == CombatState.Windup || _state == CombatState.Active || _state == CombatState.Recovery;
+
+        /// <summary>Which moveset entry the current swing is (0-based), or -1 when not swinging.</summary>
+        public int ComboAnimIndex => IsSwinging ? _swingingComboIndex : -1;
+
+        /// <summary>Progress 0..1 across the current swing's windup+active+recovery, to sync the attack clip.</summary>
+        public float SwingProgress01
+        {
+            get
+            {
+                if (!IsSwinging || _currentAttack == null)
+                    return 0f;
+                float w = _swWindup, a = _swActive, r = _swRecovery;
+                float elapsed =
+                    _state == CombatState.Windup ? _timer :
+                    _state == CombatState.Active ? w + _timer :
+                    w + a + _timer;
+                return Mathf.Clamp01(elapsed / Mathf.Max(0.0001f, w + a + r));
+            }
+        }
+
         public void Configure(WeaponRig rig, Hitbox hitbox, Health health)
         {
             _rig = rig;
@@ -154,6 +191,8 @@ namespace ParryArena.Arena
                 _bladeBaseColor = _rig.BladeRenderer.material.color;
 
             ApplyPose(_restPose);
+            _armExtension = IdleArmExtension;
+            UpdateArmBend();
             if (_hitbox != null)
                 _hitbox.Deactivate();
             if (_rig != null && _rig.Trail != null)
@@ -172,6 +211,18 @@ namespace ParryArena.Arena
         {
             _moveset = moveset;
             _comboStep = 0;
+        }
+
+        /// <summary>
+        /// Per-combo-hit phase durations derived from the attack clip's breakpoints
+        /// (set by PlayerAnimation), so each combo swing lasts exactly its slash's
+        /// length and the clip plays at its natural rhythm instead of being time-warped.
+        /// </summary>
+        public void SetComboTimings(float[] windup, float[] active, float[] recovery)
+        {
+            _comboWindup = windup;
+            _comboActive = active;
+            _comboRecovery = recovery;
         }
 
         public void SetDodgeTrail(TrailRenderer trail) => _dodgeTrail = trail;
@@ -223,6 +274,24 @@ namespace ParryArena.Arena
             EnterActive();
         }
 
+        /// <summary>
+        /// Player presses LMB: swing the current combo step on fixed, clip-synced
+        /// timing (windup → active → recovery) and advance the string. Re-pressing
+        /// during a hit's recovery chains the next; otherwise the combo lapses. The
+        /// model plays the matching slash from its 3-hit combo clip (see PlayerAnimation).
+        /// </summary>
+        public bool RequestComboHit()
+        {
+            if (!HasMoveset || (_state != CombatState.Idle && !CanComboCancel()))
+                return false;
+            if (!SpendStamina(CurrentComboAttack().StaminaCost))
+                return false;
+
+            BeginComboSwing();
+            _state = CombatState.Windup;
+            return true;
+        }
+
         public bool RequestParry()
         {
             if (_state != CombatState.Idle && _state != CombatState.Block)
@@ -257,6 +326,7 @@ namespace ParryArena.Arena
         /// </summary>
         public bool RequestForesightSlash()
         {
+            // Todo - Change into state machine
             if (!HasMoveset)
                 return false;
             if (_state != CombatState.Idle && _state != CombatState.Parry && _state != CombatState.Block)
@@ -402,20 +472,20 @@ namespace ParryArena.Arena
                     break;
 
                 case CombatState.Windup:
-                    ApplyPose(Vector3.Lerp(_restPose, _currentAttack.WindupPose, Smooth(_timer, _currentAttack.Windup)));
-                    if (_timer >= _currentAttack.Windup)
+                    ApplyPose(Vector3.Lerp(_restPose, _currentAttack.WindupPose, Smooth(_timer, _swWindup)));
+                    if (_timer >= _swWindup)
                         EnterActive();
                     break;
 
                 case CombatState.Active:
-                    ApplyPose(Vector3.Lerp(_currentAttack.WindupPose, _currentAttack.ActiveEndPose, Smooth(_timer, _currentAttack.Active)));
-                    if (_timer >= _currentAttack.Active)
+                    ApplyPose(Vector3.Lerp(_currentAttack.WindupPose, _currentAttack.ActiveEndPose, Smooth(_timer, _swActive)));
+                    if (_timer >= _swActive)
                         EnterRecovery();
                     break;
 
                 case CombatState.Recovery:
-                    ApplyPose(Vector3.Lerp(_recoveryStartPose, _restPose, Smooth(_timer, _currentAttack.Recovery)));
-                    if (_timer >= _currentAttack.Recovery)
+                    ApplyPose(Vector3.Lerp(_recoveryStartPose, _restPose, Smooth(_timer, _swRecovery)));
+                    if (_timer >= _swRecovery)
                         EnterIdle();
                     break;
 
@@ -475,6 +545,7 @@ namespace ParryArena.Arena
             if (_foresightSensor != null && _foresightSensor.activeSelf && _state != CombatState.Foresight)
                 _foresightSensor.SetActive(false);
 
+            UpdateArmBend();
             UpdateBladeColor();
         }
 
@@ -498,6 +569,47 @@ namespace ParryArena.Arena
                 ApplyPose(_guardPose);
         }
 
+        /// <summary>
+        /// Procedural secondary motion layered on the pose-driven shoulder: the
+        /// elbow coils through windup and snaps straight on the active strike while
+        /// the wrist whips the blade through, so each swing has a natural articulated
+        /// trajectory rather than a rigid sweep.
+        /// </summary>
+        void UpdateArmBend()
+        {
+            if (_rig == null || _rig.ClipDriven)
+                return;
+
+            _armExtension = Mathf.Lerp(_armExtension, TargetArmExtension(),
+                1f - Mathf.Exp(-_armBendLerp * Time.deltaTime));
+
+            float elbow = Mathf.Lerp(_cockedElbowBend, 0f, _armExtension);
+            float wrist = Mathf.Lerp(_cockedWristBend, 0f, _armExtension);
+
+            if (_rig.Elbow != null)
+                _rig.Elbow.localRotation = _rig.RestElbowRotation * Quaternion.Euler(-elbow, 0f, 0f);
+            if (_rig.Wrist != null)
+                _rig.Wrist.localRotation = _rig.RestWristRotation * Quaternion.Euler(-wrist, 0f, 0f);
+        }
+
+        /// <summary>Target arm extension for the phase: coiled (0) at the windup peak, fully extended (1) at the end of the active strike, relaxed otherwise.</summary>
+        float TargetArmExtension()
+        {
+            switch (_state)
+            {
+                case CombatState.Charge:
+                    return Mathf.Lerp(IdleArmExtension, 0f, Smooth(_timer, _chargeRaiseTime));
+                case CombatState.Windup:
+                    return Mathf.Lerp(IdleArmExtension, 0f, Smooth(_timer, _swWindup));
+                case CombatState.Active:
+                    return Smooth(_timer, _swActive);          // snap straight through the strike
+                case CombatState.Recovery:
+                    return Mathf.Lerp(1f, IdleArmExtension, Smooth(_timer, _swRecovery));
+                default:
+                    return IdleArmExtension;   // idle / block / parry / foresight hold a mostly-extended guard
+            }
+        }
+
         bool HasMoveset => _moveset != null && _moveset.Length > 0;
 
         AttackDefinition CurrentComboAttack() => _moveset[Mathf.Clamp(_comboStep, 0, _moveset.Length - 1)];
@@ -511,18 +623,33 @@ namespace ParryArena.Arena
         /// <summary>Swing the current combo step and advance the string (the finisher loops back to the start).</summary>
         void BeginComboSwing()
         {
-            var attack = CurrentComboAttack();
+            _swingingComboIndex = Mathf.Clamp(_comboStep, 0, _moveset.Length - 1);
+            var attack = _moveset[_swingingComboIndex];
             bool isFinisher = _comboStep >= _moveset.Length - 1;
             _comboStep = isFinisher ? 0 : _comboStep + 1;
             _comboExpiry = Time.unscaledTime + _comboWindow;
             BeginSwing(attack);
+            ApplyComboTimingOverride(_swingingComboIndex);
         }
 
         void BeginSwing(AttackDefinition attack)
         {
             _currentAttack = attack;
+            _swWindup = attack.Windup;
+            _swActive = attack.Active;
+            _swRecovery = attack.Recovery;
             _chargeFractionForSwing = 0f;
             _timer = 0f;
+        }
+
+        /// <summary>Replaces the current swing's phase durations with the combo clip's breakpoint-derived timings, so the FSM follows the animation's rhythm.</summary>
+        void ApplyComboTimingOverride(int index)
+        {
+            if (_comboWindup == null || index < 0 || index >= _comboWindup.Length)
+                return;
+            _swWindup = _comboWindup[index];
+            _swActive = _comboActive[index];
+            _swRecovery = _comboRecovery[index];
         }
 
         void EnterActive()
@@ -677,8 +804,9 @@ namespace ParryArena.Arena
         void ApplyPose(Vector3 euler)
         {
             _currentPose = euler;
-            if (_rig != null && _rig.Pivot != null)
-                _rig.Pivot.localRotation = _rig.RestLocalRotation * Quaternion.Euler(euler);
+            if (_rig == null || _rig.Pivot == null || _rig.ClipDriven)
+                return; // clip-driven (model) swords follow the animated hand; the clip drives the swing
+            _rig.Pivot.localRotation = _rig.RestLocalRotation * Quaternion.Euler(euler);
         }
 
         void UpdateBladeColor()
@@ -703,7 +831,7 @@ namespace ParryArena.Arena
                         break;
                     case CombatState.Windup:
                         color = TelegraphWindup
-                            ? Color.Lerp(_bladeBaseColor, TelegraphColor, Smooth(_timer, _currentAttack.Windup))
+                            ? Color.Lerp(_bladeBaseColor, TelegraphColor, Smooth(_timer, _swWindup))
                             : _bladeBaseColor;
                         break;
                     case CombatState.Active:

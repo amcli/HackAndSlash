@@ -18,7 +18,7 @@ namespace ParryArena.Arena
             var enemyDef = session.SelectedEnemy;
 
             // ---- Enemy ----
-            var enemyParts = ActorVisualFactory.CreateAvatar(enemyDef.DisplayName, enemyDef.Tint, enemyDef.BodyScale, 1.7f);
+            var enemyParts = ActorVisualFactory.CreateAvatar(enemyDef.DisplayName, enemyDef.Tint, enemyDef.BodyScale, 1.2f);
             enemyParts.Root.transform.position = new Vector3(0f, 0f, 4f);
             var enemyHealth = enemyParts.Root.AddComponent<Health>();
             var enemyStagger = enemyParts.Root.AddComponent<StaggerMeter>();
@@ -34,7 +34,7 @@ namespace ParryArena.Arena
             enemyCombat.SetStaggerMeter(enemyStagger);
 
             // ---- Player ----
-            var playerParts = ActorVisualFactory.CreateAvatar("Player", loadout.Tint, 1f, loadout.WeaponLength);
+            var playerParts = ActorVisualFactory.CreateModelAvatar("Player", loadout.Tint, loadout.WeaponLength);
             playerParts.Root.transform.position = new Vector3(0f, 0.1f, -4f);
             var controller = playerParts.Root.AddComponent<CharacterController>();
             controller.center = new Vector3(0f, 1f, 0f);
@@ -50,6 +50,8 @@ namespace ParryArena.Arena
             playerCombat.ConfigureStamina(usesStamina: true, loadout.MaxStamina);
             playerCombat.SetMoveset(loadout.Combo);
             playerCombat.SetDodgeTrail(playerParts.DodgeTrail);
+            if (playerParts.Animator != null)
+                playerParts.Animator.gameObject.AddComponent<PlayerAnimation>().Configure(controller, playerCombat);
 
             // ---- Cross-wire actors + camera ----
             player.Configure(loadout, cameraRig, playerCombat);
@@ -74,9 +76,9 @@ namespace ParryArena.Arena
         static Hitbox SetupHitbox(WeaponRig rig, CombatTeam team, ActorCombat owner)
         {
             var hitbox = rig.HitboxAnchor.gameObject.AddComponent<Hitbox>();
-            // A touch larger than the blade in every dimension so swings connect
-            // more forgivingly (the z half-extent grows with the longer blade too).
-            hitbox.Configure(team, new Vector3(0.2f, 0.2f, rig.BladeLength * 0.55f), owner);
+            // Snug to the blade (the z half-extent tracks the blade length), with a
+            // small cross-section margin so swings connect without feeling loose.
+            hitbox.Configure(team, new Vector3(0.16f, 0.16f, rig.BladeLength * 0.5f), owner);
             return hitbox;
         }
     }

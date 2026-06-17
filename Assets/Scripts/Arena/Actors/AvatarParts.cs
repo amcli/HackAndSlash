@@ -9,5 +9,6 @@ namespace ParryArena.Arena
         public WeaponRig Weapon;        // swingable weapon (pivot/blade/trail/hitbox anchor)
         public Transform HurtboxAnchor; // empty at body centre; Hurtbox component attaches here
         public TrailRenderer DodgeTrail; // body trail emitted during a dodge
+        public Animator Animator;       // model rig's Humanoid animator (null for the greybox build)
     }
 }
